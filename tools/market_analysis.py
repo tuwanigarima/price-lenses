@@ -164,6 +164,9 @@ def _offer_evidence(row: dict[str, Any], *, price_key: str = "price") -> dict[st
         "fetched_at": iso(row.get("fetched_at")),
         "availability": row.get("availability"),
         "delivery": row.get("delivery_by") or row.get("shipping"),
+        "validation_status": row.get("validation_status"),
+        "validation_checks": row.get("validation_checks") or {},
+        "validation_warnings": row.get("validation_warnings") or [],
     }
 
 
@@ -265,35 +268,50 @@ def build_market_report(
     policy = policy or FreshnessPolicy()
     now = now or utc_now()
     warnings = list(warnings or [])
+    from .market_offer_validation import validate_offer, validation_summary
+
     reference = product.get("title")
     comparable: list[dict[str, Any]] = []
-    for source in offers:
-        row = dict(source)
-        row["marketplace"] = marketplace_name(row.get("marketplace"))
-        if row["marketplace"] not in SUPPORTED_RETAILERS:
-            continue
-        if (row.get("currency") or "INR") != "INR":
-            warnings.append(f"Excluded non-INR offer {row.get('offer_id')}")
-            continue
-        compatible, conflicts = variants_compatible(reference, row.get("title"))
-        if not compatible:
-            warnings.append(
-                f"Excluded variant mismatch {row.get('offer_id')}: {', '.join(conflicts)}"
-            )
-            continue
-        if row.get("price") is None or float(row["price"]) <= 0:
-            continue
-        row["price"] = float(row["price"])
-        comparable.append(row)
-
-    comparable.sort(key=lambda row: row["price"])
-    verified = sorted({row["marketplace"] for row in comparable})
-    missing = [retailer for retailer in SUPPORTED_RETAILERS if retailer not in verified]
-    freshness = freshness_for_rows(comparable, policy, now)
+    validated_rows: list[dict[str, Any]] = []
     promo_by_offer: dict[str, list[dict[str, Any]]] = {}
     for promo in promotions:
         promo_by_offer.setdefault(str(promo.get("offer_id")), []).append(promo)
+    for source in offers:
+        row = dict(source)
+        row["marketplace"] = marketplace_name(row.get("marketplace"))
+        compatible, conflicts = variants_compatible(reference, row.get("title"))
+        try:
+            row["price"] = float(row.get("price"))
+        except (TypeError, ValueError):
+            row["price"] = None
+        validation = validate_offer(
+            row,
+            promo_by_offer.get(str(row.get("offer_id")), []),
+            policy=policy,
+            now=now,
+        )
+        row["validation_status"] = validation["status"]
+        row["validation_checks"] = validation["checks"]
+        row["validation_warnings"] = validation["warnings"]
+        row["validation_rejection_reasons"] = validation["rejection_reasons"]
+        row["validation_checks"]["product_variant"] = (
+            "PASS" if compatible else "FAIL"
+        )
+        if not compatible:
+            row["validation_status"] = "REJECTED"
+            reason = "Variant mismatch: " + ", ".join(conflicts)
+            row["validation_rejection_reasons"].append(reason)
+            warnings.append(f"Excluded {row.get('offer_id')}: {reason}")
+        validated_rows.append(row)
+        if row["validation_status"] in {"VERIFIED", "PARTIAL"}:
+            comparable.append(row)
 
+    priority = {"VERIFIED": 0, "PARTIAL": 1}
+    comparable.sort(key=lambda row: (priority[row["validation_status"]], row["price"]))
+    verified_rows = [row for row in comparable if row["validation_status"] == "VERIFIED"]
+    verified = sorted({row["marketplace"] for row in verified_rows})
+    missing = [retailer for retailer in SUPPORTED_RETAILERS if retailer not in verified]
+    freshness = freshness_for_rows(comparable, policy, now)
     ranked: list[dict[str, Any]] = []
     all_scenarios: list[dict[str, Any]] = []
     for row in comparable:
@@ -305,11 +323,23 @@ def build_market_report(
         evidence["promotion_count"] = len(promo_by_offer.get(str(row.get("offer_id")), []))
         ranked.append(evidence)
 
-    ranked.sort(key=lambda row: (row["unconditional_price"], row["retailer"]))
+    ranked.sort(
+        key=lambda row: (
+            priority.get(str(row.get("validation_status")), 9),
+            row["unconditional_price"],
+            row["retailer"],
+        )
+    )
     all_scenarios.sort(key=lambda scenario: scenario["price"])
-    best_listed = _offer_evidence(comparable[0]) if comparable else None
+    best_listed = _offer_evidence(verified_rows[0]) if verified_rows else None
     best_unconditional = dict(best_listed) if best_listed else None
-    best_conditional = all_scenarios[0] if all_scenarios else None
+    verified_ids = {str(row.get("offer_id")) for row in verified_rows}
+    verified_scenarios = [
+        scenario
+        for scenario in all_scenarios
+        if str(scenario.get("offer_id")) in verified_ids
+    ]
+    best_conditional = verified_scenarios[0] if verified_scenarios else None
 
     normalized_sales = []
     for sale in sales:
@@ -374,6 +404,7 @@ def build_market_report(
         },
         freshness=freshness,
         best_listed_offer=best_listed,
+        best_verified_offer=best_unconditional,
         best_unconditional_offer=best_unconditional,
         best_conditional_offer=best_conditional,
         ranked_offers=ranked,
@@ -383,5 +414,6 @@ def build_market_report(
         missing_inputs=sorted(set(missing_inputs)),
         warnings=list(dict.fromkeys(warnings)),
         evidence=[_offer_evidence(row) for row in comparable],
+        validation_summary=validation_summary(validated_rows),
         summary=summary,
     )

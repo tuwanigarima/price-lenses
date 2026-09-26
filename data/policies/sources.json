@@ -1,0 +1,42 @@
+[
+  {
+    "retailer": "Amazon India",
+    "policy_type": "RETURN",
+    "source_url": "https://www.amazon.in/gp/help/customer/display.html?nodeId=GKM69DUUYKQWKWX7",
+    "source_authority": "AUTHORITATIVE",
+    "approved_for_ingestion": true,
+    "review_notes": "Official Amazon India help page; verify page title after first fetch."
+  },
+  {
+    "retailer": "Flipkart",
+    "policy_type": "RETURN",
+    "source_url": "https://www.flipkart.com/pages/returnpolicy",
+    "source_authority": "AUTHORITATIVE",
+    "approved_for_ingestion": true,
+    "review_notes": "Official Flipkart return policy."
+  },
+  {
+    "retailer": "Croma",
+    "policy_type": "RETURN",
+    "source_url": "https://www.croma.com/lp-cancellation-and-return",
+    "source_authority": "AUTHORITATIVE",
+    "approved_for_ingestion": true,
+    "review_notes": "Official Croma cancellation and return page."
+  },
+  {
+    "retailer": "Reliance Digital",
+    "policy_type": "RETURN",
+    "source_url": "https://www.reliancedigital.in/content/return-and-cancellation-policy",
+    "source_authority": "AUTHORITATIVE",
+    "approved_for_ingestion": true,
+    "review_notes": "Official Reliance Digital policy candidate; fetch validation remains mandatory."
+  },
+  {
+    "retailer": "Vijay Sales",
+    "policy_type": "RETURN",
+    "source_url": "https://www.vijaysales.com/return-and-cancellation-policy",
+    "source_authority": "AUTHORITATIVE",
+    "approved_for_ingestion": false,
+    "review_notes": "Candidate official URL; manually validate before enabling ingestion."
+  }
+]

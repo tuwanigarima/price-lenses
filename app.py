@@ -1,8 +1,6 @@
 """PriceLens Streamlit application with history and live-market workspaces."""
 from __future__ import annotations
 
-from dataclasses import replace
-
 import pandas as pd
 import plotly.express as px
 import streamlit as st
@@ -10,11 +8,8 @@ import streamlit as st
 from orchestrator import graph
 from tools import market_ui
 from tools.analytics import get_db_connection
-from tools.market_agent import MarketInvestigatorAgent
-from tools.market_agent_models import FreshnessPolicy, MarketAgentRequest
-from tools.market_config import ConfigurationError, MarketSettings
+from tools.market_config import MarketSettings
 from tools.market_db import MarketDatabase, MarketSchemaError
-from tools.market_service import build_providers
 
 
 st.set_page_config(page_title="PriceLens Advisor", page_icon="🔍", layout="wide")
@@ -39,30 +34,6 @@ def fetch_price_history(canonical_id: str) -> pd.DataFrame:
             )
     finally:
         connection.close()
-
-
-def run_history_analysis(query: str) -> dict | None:
-    initial_state = {"query": query}
-    result_state = initial_state.copy()
-    with st.status("🚀 Executing History Agent workflow...", expanded=True) as status:
-        try:
-            for event in graph.stream(initial_state, {"recursion_limit": 15}):
-                for node_name, node_state in event.items():
-                    st.write(f"✅ **{node_name.replace('_', ' ').title()}** completed")
-                    result_state.update(node_state)
-                    if result_state.get("errors"):
-                        break
-            errors = result_state.get("errors", [])
-            if errors:
-                status.update(label="Analysis failed", state="error", expanded=True)
-                st.error(errors[0])
-                return None
-            status.update(label="History analysis complete", state="complete", expanded=False)
-            return result_state
-        except Exception as exc:
-            status.update(label="History analysis failed", state="error", expanded=True)
-            st.error(f"History Agent error: {exc}")
-            return None
 
 
 def render_history_results(result_state: dict) -> None:
@@ -138,42 +109,6 @@ def render_history_results(result_state: dict) -> None:
                 )
                 st.plotly_chart(figure, width="stretch")
 
-    with st.container(border=True):
-        st.info("⏳ Review Intelligence Agent is pending implementation.")
-
-
-def render_history_tab() -> None:
-    st.subheader("History & Purchase Timing")
-    st.caption(
-        "Analyze stored PostgreSQL price history and receive a BUY NOW or WAIT recommendation."
-    )
-    with st.form("history_search_form"):
-        input_column, button_column = st.columns([5, 1])
-        query = input_column.text_input(
-            "Amazon URL, ASIN, or product name",
-            value=st.session_state.get("history_query", "B0CS5XW6TN"),
-            help="Try an ASIN, a product name, or an Amazon /dp/ link.",
-        )
-        submitted = button_column.form_submit_button(
-            "Analyze", type="primary", width="stretch"
-        )
-
-    if submitted:
-        if not query.strip():
-            st.warning("Enter a product to analyze.")
-        else:
-            st.session_state["history_query"] = query.strip()
-            result = run_history_analysis(query.strip())
-            if result:
-                st.session_state["history_result"] = result
-
-    result = st.session_state.get("history_result")
-    if result:
-        render_history_results(result)
-    else:
-        st.info("Enter a product above to inspect its historical price behavior.")
-
-
 def market_database(settings: MarketSettings) -> MarketDatabase | None:
     try:
         return MarketDatabase(settings.database_url)
@@ -199,6 +134,8 @@ def render_market_results(
     offer_rows: list[dict],
     promotion_rows: list[dict],
     report: dict | None = None,
+    *,
+    key_prefix: str = "unified_market",
 ) -> None:
     if report and report.get("unresolved_variant_fields"):
         st.info(
@@ -211,6 +148,24 @@ def render_market_results(
             item.get("offer_id") for item in report["evidence"] if item.get("offer_id")
         }
         offer_rows = [row for row in offer_rows if row.get("offer_id") in evidence_ids]
+    if report:
+        validation_by_id = {
+            str(item.get("offer_id")): item
+            for item in report.get("ranked_offers") or []
+            if item.get("offer_id")
+        }
+        offer_rows = [
+            {
+                **row,
+                "validation_status": validation_by_id.get(
+                    str(row.get("offer_id")), {}
+                ).get("validation_status"),
+                "validation_warnings": validation_by_id.get(
+                    str(row.get("offer_id")), {}
+                ).get("validation_warnings", []),
+            }
+            for row in offer_rows
+        ]
     rows = market_ui.enrich_rows(offer_rows)
     st.subheader(f"Results for “{query}”")
     if not rows:
@@ -231,16 +186,16 @@ def render_market_results(
         "Product",
         [""] + list(product_labels),
         format_func=lambda value: "All matched products" if not value else product_labels[value],
-        key=f"market_product_{query}",
+        key=f"{key_prefix}_product_{query}",
     )
     chosen_markets = market_column.multiselect(
         "Marketplace",
         marketplaces,
         default=marketplaces,
-        key=f"market_marketplaces_{query}",
+        key=f"{key_prefix}_marketplaces_{query}",
     )
     minimum_rating = rating_column.slider(
-        "Min rating", 0.0, 5.0, 0.0, 0.5, key=f"market_rating_{query}"
+        "Min rating", 0.0, 5.0, 0.0, 0.5, key=f"{key_prefix}_rating_{query}"
     )
     filtered = market_ui.filter_rows(
         rows, chosen_markets, minimum_rating, chosen_product or None
@@ -249,7 +204,10 @@ def render_market_results(
         st.warning("No offers match the selected filters.")
         return
 
-    summary = market_ui.summarize(filtered)
+    verified_filtered = [
+        row for row in filtered if row.get("validation_status") == "VERIFIED"
+    ]
+    summary = market_ui.summarize(verified_filtered)
     metric_columns = st.columns(4)
     cheapest = summary["cheapest"]
     metric_columns[0].metric(
@@ -263,7 +221,7 @@ def render_market_results(
         market_ui.format_money(summary["average"], summary["currency"]),
     )
     metric_columns[2].metric(
-        "Offers · Marketplaces", f"{summary['offers']} · {summary['marketplaces']}"
+        "Verified · Marketplaces", f"{summary['offers']} · {summary['marketplaces']}"
     )
     best_rated = summary["best_rated"]
     metric_columns[3].metric(
@@ -314,12 +272,13 @@ def render_market_results(
         table.to_csv(index=False).encode("utf-8"),
         "market-offers.csv",
         "text/csv",
+        key=f"{key_prefix}_download_{query}",
     )
 
     currency = summary["currency"]
     chart_rows = [
         row
-        for row in filtered
+        for row in verified_filtered
         if row.get("effective_price") is not None and row.get("currency") == currency
     ]
     if chart_rows:
@@ -365,6 +324,14 @@ def render_market_agent_report(report: dict) -> None:
         f"{len(coverage.get('verified_retailers', []))}/{len(coverage.get('expected_retailers', []))}",
     )
     columns[3].metric("Confidence", f"{float(report.get('confidence') or 0):.0%}")
+    validation = report.get("validation_summary") or {}
+    st.caption(
+        "Offer validation: "
+        f"{validation.get('verified', 0)} verified · "
+        f"{validation.get('partial', 0)} partial · "
+        f"{validation.get('stale', 0)} stale · "
+        f"{validation.get('rejected', 0)} rejected"
+    )
     st.write(report.get("summary") or "No Agent 2 summary is available.")
     st.caption(
         f"Match: {str(report.get('match_mode', 'unknown')).replace('_', ' ')} · "
@@ -398,6 +365,7 @@ def render_market_agent_report(report: dict) -> None:
                 "Conditional price": group_conditional.get("price"),
                 "Retailer": group_best.get("retailer"),
                 "Seller": group_best.get("seller"),
+                "Validation": group_best.get("validation_status"),
                 "Offers": group.get("offer_count"),
                 "Promotions": group.get("promotion_count"),
                 "Link": group_best.get("url"),
@@ -441,131 +409,217 @@ def render_market_agent_report(report: dict) -> None:
                 st.caption("Prompt: Not applicable — this stage does not use an LLM.")
 
 
-def render_market_tab() -> None:
-    st.subheader("Live Market Investigator")
+def render_policy_report(report: dict) -> None:
+    st.subheader("Agent 3 policy & purchase-protection analysis")
+    st.write(report.get("summary") or "No Agent 3 summary is available.")
+    columns = st.columns(4)
+    columns[0].metric("Retailers", len(report.get("policy_profiles") or []))
+    columns[1].metric("Policy chunks", report.get("evidence_chunk_count", 0))
+    columns[2].metric("Evidence gaps", report.get("evidence_gap_count", 0))
+    columns[3].metric("Evidence status", str(report.get("status", "unknown")).title())
+    for warning in report.get("warnings") or []:
+        st.warning(warning)
+
+    rows: list[dict] = []
+    for profile in report.get("policy_profiles") or []:
+        for policy in profile.get("policies") or []:
+            citations = policy.get("citations") or []
+            first_citation = citations[0] if citations else {}
+            rows.append(
+                {
+                    "Retailer": profile.get("retailer"),
+                    "Policy": policy.get("policy_type"),
+                    "Status": policy.get("status"),
+                    "Summary": policy.get("summary"),
+                    "Confidence": policy.get("confidence"),
+                    "Citations": len(citations),
+                    "Source": first_citation.get("source_url"),
+                }
+            )
+    if rows:
+        st.dataframe(
+            pd.DataFrame(rows),
+            hide_index=True,
+            width="stretch",
+            column_config={
+                "Confidence": st.column_config.NumberColumn(format="%.0%%"),
+                "Source": st.column_config.LinkColumn("Source", display_text="Open"),
+            },
+        )
+    else:
+        st.info("No active retailer policy evidence was available for Agent 3.")
+
+    for observation in report.get("cross_retailer_observations") or []:
+        st.info(observation)
     st.caption(
-        "Compare India prices, sellers, availability, and product-specific promotions "
-        "from SerpAPI and Apify."
-    )
-    st.warning(
-        "Analyze market checks SerpAPI/Apify first and may consume credits. "
-        "Analyze stored data only never calls providers."
+        "Agent 3 evaluates retailer-level protections only. Listing-specific terms "
+        "must be combined with Agent 2 evidence by the future synthesizer."
     )
 
-    try:
-        settings = MarketSettings.from_env()
-    except ConfigurationError as exc:
-        st.error(f"Market configuration error: {exc}")
-        st.code("DATABASE_URL=<postgresql connection string>", language="bash")
+    with st.expander("How Agent 3 investigated retailer policies"):
+        trace = report.get("agent_trace") or []
+        if not trace:
+            st.caption("No execution trace is available for this analysis.")
+        for index, event in enumerate(trace, start=1):
+            st.markdown(
+                f"**{index}. {str(event.get('stage') or '').replace('_', ' ').title()}**"
+            )
+            st.caption(
+                f"Tool: {event.get('tool', '-')} · Source: {event.get('source', '-')} · "
+                f"Status: {event.get('status', 'unknown')} · "
+                f"{float(event.get('duration_ms') or 0):,.0f} ms"
+            )
+            st.write(event.get("output_summary") or "No output summary.")
+            if event.get("display_prompt"):
+                st.code(event["display_prompt"], language="text")
+            else:
+                st.caption("Prompt: Not applicable — this stage does not use an LLM.")
+
+
+def run_unified_analysis(query: str, *, live_market: bool) -> dict | None:
+    initial_state = {
+        "query": query,
+        "force_market_refresh": live_market,
+        "market_provider_policy": "api_first" if live_market else "database_only",
+    }
+    result_state = initial_state.copy()
+    completed_agents: set[str] = set()
+    orchestration_trace: list[dict[str, str]] = []
+    with st.status("Running Agents 1, 2, and 3 in parallel...", expanded=True) as status:
+        try:
+            for event in graph.stream(initial_state, {"recursion_limit": 15}):
+                for node_name, node_state in event.items():
+                    result_state.update(node_state)
+                    orchestration_trace.append(
+                        {
+                            "stage": node_name,
+                            "status": "completed",
+                            "output": (
+                                "Report returned"
+                                if node_name.endswith("_agent")
+                                else "Graph stage completed"
+                            ),
+                        }
+                    )
+                    if node_name in {"history_agent", "market_agent", "policy_agent"}:
+                        completed_agents.add(node_name)
+                        st.write(f"✅ {node_name.replace('_', ' ').title()} completed")
+                    elif node_name == "input_resolver":
+                        st.write("✅ Product input resolved")
+                    elif node_name == "decision_synthesizer":
+                        st.write("ℹ️ Decision synthesizer is pending future implementation")
+                    elif node_name == "verifier_gate":
+                        st.write("ℹ️ Final verifier is pending future implementation")
+            if len(completed_agents) != 3:
+                status.update(
+                    label="Unified analysis incomplete", state="error", expanded=True
+                )
+                st.error("Not every specialist agent returned a report.")
+                return None
+            status.update(
+                label="All three specialist agents completed",
+                state="complete",
+                expanded=False,
+            )
+            result_state["orchestration_trace"] = orchestration_trace
+            return result_state
+        except Exception as exc:
+            status.update(label="Unified analysis failed", state="error", expanded=True)
+            st.error(f"Unified analysis error: {exc}")
+            return None
+
+
+def render_unified_tab() -> None:
+    st.subheader("Unified Three-Agent Analysis")
+    st.caption(
+        "One product input launches History, Market, and Policy Protection agents in "
+        "parallel. The final cross-agent synthesizer is not implemented yet."
+    )
+    with st.form("unified_analysis_form"):
+        query = st.text_input(
+            "Product name, ASIN, or product URL",
+            value=st.session_state.get("unified_query", ""),
+            placeholder="e.g. iPhone 14 256 GB Blue",
+        )
+        live_market = st.checkbox(
+            "Fetch live market evidence with SerpAPI and Apify",
+            value=False,
+            help="Disable this to run all agents using only locally stored data.",
+        )
+        submitted = st.form_submit_button(
+            "Run all three agents", type="primary", width="stretch"
+        )
+    if submitted:
+        if not query.strip():
+            st.warning("Enter a product to analyze.")
+        else:
+            st.session_state["unified_query"] = query.strip()
+            result = run_unified_analysis(query.strip(), live_market=live_market)
+            if result:
+                st.session_state["unified_result"] = result
+
+    result = st.session_state.get("unified_result")
+    if not result:
+        st.info("Enter one product above to run all three specialist agents.")
         return
 
-    with st.form("market_search_form"):
-        query = st.text_input(
-            "Amazon/Flipkart URL, ASIN, or product name",
-            value=st.session_state.get("market_query", ""),
-            placeholder="e.g. Apple iPhone 16 128GB",
-        )
-        option_columns = st.columns(4)
-        use_serpapi = option_columns[0].checkbox("SerpAPI", value=True)
-        use_apify = option_columns[1].checkbox("Apify", value=True)
-        enrich_amazon = option_columns[2].checkbox(
-            "Amazon details",
-            value=settings.serpapi_enrich_amazon,
-            help="Uses extra SerpAPI Product API credits. Amazon Search remains the discovery API.",
-        )
-        enrich_apify = option_columns[3].checkbox(
-            "Seller/promotion enrichment",
-            value=bool(settings.apify_enrichers),
-            help="Runs product-detail actors and may consume additional Apify credits.",
-        )
-        limit = st.slider("Results per provider", 5, 50, 20, step=5)
-        fetch_button, load_button = st.columns(2)
-        analyze_market = fetch_button.form_submit_button(
-            "Analyze market", type="primary", width="stretch"
-        )
-        load_stored = load_button.form_submit_button(
-            "Analyze stored data only", width="stretch"
-        )
+    reports = st.columns(3)
+    history = result.get("history_report") or {}
+    market = result.get("market_report") or {}
+    policy = result.get("policy_report") or {}
+    reports[0].metric(
+        "Agent 1 · History",
+        (history.get("trend") or {}).get("historical_stance", "No evidence"),
+    )
+    reports[1].metric("Agent 2 · Market", str(market.get("status", "unknown")).title())
+    reports[2].metric(
+        "Agent 3 · Policy", str(policy.get("status", "unknown")).title()
+    )
+    st.info(
+        "Synthesizer: pending future implementation. No combined BUY/WAIT verdict "
+        "has been generated."
+    )
 
-    normalized_query = query.strip()
-    if analyze_market or load_stored:
-        if not normalized_query:
-            st.warning("Enter a product name or product URL.")
-        else:
-            st.session_state["market_query"] = normalized_query
-            st.session_state["market_active_query"] = normalized_query
-
-    if (analyze_market or load_stored) and normalized_query:
-        provider_names = [
-            name
-            for name, enabled in (("serpapi", use_serpapi), ("apify", use_apify))
-            if enabled and analyze_market
-        ]
-        if analyze_market and not provider_names:
-            st.warning("Select at least one provider.")
-        else:
-            runtime_settings = replace(
-                settings,
-                serpapi_enrich_amazon=enrich_amazon,
-                apify_enrichers=settings.apify_enrichers if enrich_apify else (),
+    with st.expander("Unified execution flow"):
+        for index, event in enumerate(result.get("orchestration_trace") or [], start=1):
+            st.markdown(
+                f"**{index}. {str(event.get('stage') or '').replace('_', ' ').title()}**"
             )
-            providers = []
-            for provider_name in provider_names:
-                try:
-                    providers.extend(build_providers(runtime_settings, (provider_name,)))
-                except ConfigurationError as exc:
-                    st.error(f"{provider_name}: {exc}")
-            database = market_database(runtime_settings)
-            if database is not None:
-                try:
-                    freshness = FreshnessPolicy(
-                        price_minutes=runtime_settings.market_price_freshness_minutes,
-                        availability_minutes=runtime_settings.market_availability_freshness_minutes,
-                        delivery_minutes=runtime_settings.market_delivery_freshness_minutes,
-                        promotion_minutes=runtime_settings.market_promotion_freshness_minutes,
-                        seller_minutes=runtime_settings.market_seller_freshness_minutes,
-                        product_minutes=runtime_settings.market_product_freshness_minutes,
-                    )
-                    with st.spinner("Agent 2 is checking stored evidence and provider freshness..."):
-                        report = MarketInvestigatorAgent(
-                            database,
-                            providers,
-                            freshness=freshness,
-                            enable_llm_summary=runtime_settings.market_agent_llm_enabled,
-                        ).analyze(
-                            MarketAgentRequest(
-                                query=normalized_query,
-                                provider_policy=(
-                                    "api_first" if analyze_market else "database_only"
-                                ),
-                            ),
-                            limit=limit,
-                        )
-                    st.session_state["market_agent_report"] = report
-                    st.session_state["market_run_results"] = report.get("provider_runs", [])
-                finally:
-                    database.close()
+            st.caption(f"Status: {event.get('status', 'unknown')}")
+            st.write(event.get("output") or "Stage completed.")
 
-    for result in st.session_state.get("market_run_results", []):
-        if result["status"] == "error":
-            st.error(f"{result['provider']}: {result['error']}")
+    history_results_tab, market_results_tab, policy_results_tab = st.tabs(
+        ["Agent 1 report", "Agent 2 report", "Agent 3 policy report"]
+    )
+    with history_results_tab:
+        if history.get("trend"):
+            render_history_results(result)
         else:
-            st.success(
-                f"{result['provider']}: {result['count']} offers stored "
-                f"({result['status']})"
+            st.warning("Agent 1 found no usable historical evidence.")
+            if history.get("llm_analysis"):
+                st.info(history["llm_analysis"])
+            with st.expander("View Agent 1 LLM and tool trace"):
+                trace = history.get("agent_trace") or []
+                if not trace:
+                    st.caption("No execution trace is available for this analysis.")
+                for log_entry in trace:
+                    st.code(log_entry, language="text")
+    with market_results_tab:
+        render_market_agent_report(market)
+        try:
+            settings = MarketSettings.from_env()
+            offers, promotions = fetch_market_results(result["query"], settings)
+            render_market_results(
+                result["query"],
+                offers,
+                promotions,
+                market,
+                key_prefix="unified_market",
             )
-            for warning in result.get("warnings", []):
-                st.warning(f"{result['provider']}: {warning}")
-
-    active_query = st.session_state.get("market_active_query")
-    if active_query:
-        report = st.session_state.get("market_agent_report")
-        if report:
-            render_market_agent_report(report)
-        offers, promotions = fetch_market_results(active_query, settings)
-        render_market_results(active_query, offers, promotions, report)
-    else:
-        st.info("Fetch live offers or load an exact query already stored in PostgreSQL.")
+        except Exception as exc:
+            st.error(f"Unable to render stored market rows: {exc}")
+    with policy_results_tab:
+        render_policy_report(policy)
 
 
 st.title("🔍 PriceLens: Autonomous Deal Advisor")
@@ -573,8 +627,4 @@ st.caption(
     "Use historical pricing to decide when to buy, then compare live Indian-market offers."
 )
 
-history_tab, market_tab = st.tabs(["📈 History & Timing", "🛒 Market Investigator"])
-with history_tab:
-    render_history_tab()
-with market_tab:
-    render_market_tab()
+render_unified_tab()

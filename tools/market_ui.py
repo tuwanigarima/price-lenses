@@ -139,6 +139,8 @@ def offers_table(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "Return policy": row.get("return_policy"),
             "Delivery by": row.get("delivery_by"),
             "Availability": row.get("availability"),
+            "Validation": row.get("validation_status"),
+            "Validation warnings": " | ".join(row.get("validation_warnings") or []),
             "Delivery": row.get("shipping"),
             "Offers": " | ".join(row.get("offer_labels", [])),
             "Source": row.get("provider"),

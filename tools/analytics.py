@@ -1,6 +1,5 @@
 import os
 import psycopg2
-from urllib.parse import urlparse
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -8,24 +7,10 @@ load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("PL_DATABASE_URL")
 
 def get_db_connection():
-    """Establishes a robust connection to Neon PostgreSQL, with DNS fallback."""
+    """Connect to the configured PostgreSQL instance (local during development)."""
     if not DATABASE_URL:
         raise ValueError("DATABASE_URL is missing in environment.")
-    try:
-        return psycopg2.connect(DATABASE_URL, sslmode="require", connect_timeout=5)
-    except Exception:
-        # Fallback for macOS local DNS resolution issues with Neon poolers
-        p = urlparse(DATABASE_URL)
-        return psycopg2.connect(
-            dbname=p.path.lstrip("/"),
-            user=p.username,
-            password=p.password,
-            host=p.hostname,
-            port=p.port or 5432,
-            hostaddr="52.95.251.153",
-            sslmode="require",
-            connect_timeout=10
-        )
+    return psycopg2.connect(DATABASE_URL, connect_timeout=10)
 
 def query_historical_trend(canonical_id: str) -> dict:
     """
@@ -37,11 +22,22 @@ def query_historical_trend(canonical_id: str) -> dict:
         conn = get_db_connection()
         with conn.cursor() as cur:
             # 1. Get current price
-            cur.execute("SELECT current_price FROM products WHERE canonical_id = %s", (canonical_id,))
+            cur.execute(
+                """
+                SELECT current_price, all_time_low, all_time_high,
+                       avg_30_days, overall_avg
+                FROM products WHERE canonical_id = %s
+                """,
+                (canonical_id,),
+            )
             prod_row = cur.fetchone()
             if not prod_row or not prod_row[0]:
                 return {"error": f"Product {canonical_id} or current_price not found."}
             current_price = float(prod_row[0])
+            stored_atl = float(prod_row[1]) if prod_row[1] is not None else None
+            stored_ath = float(prod_row[2]) if prod_row[2] is not None else None
+            stored_avg_30d = float(prod_row[3]) if prod_row[3] is not None else None
+            stored_overall_avg = float(prod_row[4]) if prod_row[4] is not None else None
 
             # 2. Get Overall Stats from history
             cur.execute("""
@@ -53,15 +49,25 @@ def query_historical_trend(canonical_id: str) -> dict:
             
             if not hist_stats or hist_stats[3] == 0:
                 # Edge case: No history points
+                true_atl = stored_atl if stored_atl is not None else current_price
+                true_ath = stored_ath if stored_ath is not None else current_price
+                if true_ath > true_atl:
+                    score = 100.0 * (1.0 - (current_price - true_atl) / (true_ath - true_atl))
+                    score = max(0.0, min(100.0, score))
+                else:
+                    score = 50.0
                 return {
                     "canonical_id": canonical_id,
                     "current_price": current_price,
-                    "true_atl": current_price,
-                    "true_ath": current_price,
+                    "true_atl": true_atl,
+                    "true_ath": true_ath,
+                    "avg_30d": stored_avg_30d or current_price,
+                    "overall_avg": stored_overall_avg or current_price,
                     "total_history_days": 0,
-                    "s_history": 50.0,
-                    "historical_stance": "WAIT",
-                    "note": "No price history available."
+                    "s_history": round(score, 2),
+                    "historical_stance": "BUY_NOW" if score >= 75 else "WAIT",
+                    "evidence_mode": "stored_aggregates",
+                    "note": "No dated price history is available; stored aggregates were used."
                 }
             
             true_atl = float(hist_stats[0])
@@ -128,16 +134,26 @@ def query_sale_event_drops(canonical_id: str) -> dict:
         conn = get_db_connection()
         with conn.cursor() as cur:
             # 1. Get baseline prices
-            cur.execute("SELECT current_price FROM products WHERE canonical_id = %s", (canonical_id,))
+            cur.execute(
+                """
+                SELECT current_price, all_time_low, avg_30_days
+                FROM products WHERE canonical_id = %s
+                """,
+                (canonical_id,),
+            )
             prod_row = cur.fetchone()
             if not prod_row:
                 return {"error": f"Product {canonical_id} not found."}
             current_price = float(prod_row[0])
+            stored_atl = float(prod_row[1]) if prod_row[1] is not None else None
+            stored_avg_30d = float(prod_row[2]) if prod_row[2] is not None else None
             
             # Also get 30-day avg and true ATL
             cur.execute("SELECT MIN(price) FROM price_history WHERE canonical_id = %s", (canonical_id,))
             atl_row = cur.fetchone()
-            true_atl = float(atl_row[0]) if atl_row and atl_row[0] else current_price
+            true_atl = float(atl_row[0]) if atl_row and atl_row[0] else (
+                stored_atl if stored_atl is not None else current_price
+            )
 
             cur.execute("""
                 SELECT AVG(price) FROM (
@@ -146,7 +162,9 @@ def query_sale_event_drops(canonical_id: str) -> dict:
                 ) sub
             """, (canonical_id,))
             avg30_row = cur.fetchone()
-            avg_30d = float(avg30_row[0]) if avg30_row and avg30_row[0] else current_price
+            avg_30d = float(avg30_row[0]) if avg30_row and avg30_row[0] else (
+                stored_avg_30d if stored_avg_30d is not None else current_price
+            )
 
             # 2. Look for historical festive drops (Months 9, 10 for BBD/Diwali, 1 for Republic Day, 7 for Prime Day)
             cur.execute("""

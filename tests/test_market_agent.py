@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 from tools.market_agent import MarketInvestigatorAgent
 from tools.market_agent_models import MarketAgentRequest, SUPPORTED_RETAILERS
@@ -319,38 +320,67 @@ def test_agent_trace_exposes_only_display_safe_prompts_for_real_llm_stages():
 
     assert [event["tool"] for event in report["agent_trace"]] == [
         "parse_product_request",
+        "plan_market_tools",
         "get_market_snapshot",
         "group_product_variants",
+        "validate_offer_snapshot",
         "verify_market_report",
         "generate_market_summary",
     ]
+    assert report["agent_trace"][1]["status"] == "skipped"
+    assert "provider policy" in report["agent_trace"][1]["display_prompt"]
     assert all(
         event["display_prompt"] is None
-        for event in report["agent_trace"][:-1]
+        for event in report["agent_trace"][2:-1]
     )
     assert report["agent_trace"][-1]["status"] == "skipped"
     assert "verified Indian-market" in report["agent_trace"][-1]["display_prompt"]
 
 
-def test_agent2_openai_configuration_is_isolated_and_requires_a_key(monkeypatch):
+def test_agent2_uses_shared_openai_configuration_and_requires_a_key(monkeypatch):
     for name in (
-        "MARKET_AGENT_LLM_BASE_URL", "MARKET_AGENT_LLM_API_KEY",
-        "MARKET_AGENT_LLM_MODEL", "OPENAI_API_KEY", "LLM_BASE_URL",
-        "LLM_API_KEY", "LLM_MODEL",
+        "MARKET_AGENT_LLM_BASE_URL", "MARKET_AGENT_LLM_MODEL",
+        "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL",
     ):
         monkeypatch.delenv(name, raising=False)
 
     try:
         MarketInvestigatorAgent._llm_runtime_config()
     except ValueError as exc:
-        assert "MARKET_AGENT_LLM_API_KEY" in str(exc)
+        assert "OPENAI_API_KEY" in str(exc)
     else:
         raise AssertionError("OpenAI configuration accepted a missing key")
 
-    monkeypatch.setenv("MARKET_AGENT_LLM_API_KEY", "test-only-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-only-key")
     assert MarketInvestigatorAgent._llm_runtime_config() == (
-        "https://api.openai.com/v1", "test-only-key", "gpt-6-luna"
+        "https://api.openai.com/v1", "test-only-key", "gpt-5-mini"
     )
+
+
+def test_agent2_llm_plan_cannot_override_database_only_policy(monkeypatch):
+    import langchain_openai
+
+    class FakeChatOpenAI:
+        def __init__(self, **_kwargs): pass
+        def bind_tools(self, _schemas): return self
+        def invoke(self, _prompt):
+            return SimpleNamespace(
+                tool_calls=[{"name": "search_current_market", "args": {}}]
+            )
+
+    monkeypatch.setattr(langchain_openai, "ChatOpenAI", FakeChatOpenAI)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-only-key")
+    agent = MarketInvestigatorAgent(
+        VariantDatabase(), [], enable_llm_summary=True
+    )
+    trace = []
+
+    plan = agent._plan_market_tools(
+        MarketAgentRequest("vivo s2", provider_policy="database_only"), trace
+    )
+
+    assert plan == ["load_stored_market_data", "validate_offer_snapshot"]
+    assert trace[0]["source"] == "llm"
 
 
 def test_variant_parser_supports_non_phone_electronics():
@@ -444,3 +474,60 @@ def test_verifier_checks_prices_inside_every_variant_group():
         assert "variant_groups[1]" in str(exc)
     else:
         raise AssertionError("tampered variant price passed verification")
+
+
+def test_stale_and_variant_mismatch_offers_cannot_win_best_verified_price():
+    now = datetime.now(timezone.utc)
+    rows = [
+        offer_row("fresh", "amazon.in", 70000, now),
+        offer_row(
+            "stale",
+            "flipkart.com",
+            100,
+            now - timedelta(hours=3),
+        ),
+        offer_row(
+            "wrong-variant",
+            "croma.com",
+            200,
+            now,
+            title="Apple iPhone 16 256GB Black",
+        ),
+    ]
+
+    report = build_market_report(
+        product={"canonical_id": "B0EXAMPLE1", "title": "Apple iPhone 16 128GB Black"},
+        offers=rows,
+        promotions=[],
+        sales=[],
+        now=now,
+    ).to_dict()
+
+    assert report["best_verified_offer"]["offer_id"] == "fresh"
+    assert report["validation_summary"] == {
+        "verified": 1,
+        "partial": 0,
+        "stale": 1,
+        "rejected": 1,
+    }
+    assert {row["offer_id"] for row in report["ranked_offers"]} == {"fresh"}
+
+
+def test_partial_offer_is_visible_but_cannot_replace_verified_best_offer():
+    now = datetime.now(timezone.utc)
+    partial = offer_row("partial", "amazon.in", 60000, now)
+    partial["seller_name"] = None
+    verified = offer_row("verified", "flipkart.com", 65000, now)
+
+    report = build_market_report(
+        product={"canonical_id": "B0EXAMPLE1", "title": "Apple iPhone 16 128GB Black"},
+        offers=[partial, verified],
+        promotions=[],
+        sales=[],
+        now=now,
+    ).to_dict()
+
+    assert report["best_verified_offer"]["offer_id"] == "verified"
+    assert report["best_unconditional_offer"]["offer_id"] == "verified"
+    assert report["ranked_offers"][1]["offer_id"] == "partial"
+    assert report["ranked_offers"][1]["validation_status"] == "PARTIAL"

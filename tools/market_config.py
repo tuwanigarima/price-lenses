@@ -13,6 +13,11 @@ from dataclasses import dataclass, field
 from dotenv import load_dotenv
 
 
+# Load the project file once. Re-loading inside ``from_env`` would restore a
+# value deliberately removed or overridden by a caller/test.
+load_dotenv()
+
+
 class ConfigurationError(ValueError):
     """Raised when Market Investigator configuration is invalid."""
 
@@ -82,7 +87,6 @@ class MarketSettings:
 
     @classmethod
     def from_env(cls) -> "MarketSettings":
-        load_dotenv()
         database_url = (
             os.getenv("DATABASE_URL") or os.getenv("PL_DATABASE_URL") or ""
         ).strip()

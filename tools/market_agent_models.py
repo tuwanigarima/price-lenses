@@ -51,7 +51,7 @@ class FreshnessPolicy:
 
 @dataclass
 class MarketReport:
-    schema_version: str = "1.1"
+    schema_version: str = "1.2"
     agent: str = "market_investigator"
     status: Literal["complete", "partial", "insufficient_evidence", "error"] = (
         "insufficient_evidence"
@@ -62,6 +62,7 @@ class MarketReport:
     coverage: dict[str, Any] = field(default_factory=dict)
     freshness: dict[str, Any] = field(default_factory=dict)
     best_listed_offer: dict[str, Any] | None = None
+    best_verified_offer: dict[str, Any] | None = None
     best_unconditional_offer: dict[str, Any] | None = None
     best_conditional_offer: dict[str, Any] | None = None
     ranked_offers: list[dict[str, Any]] = field(default_factory=list)
@@ -81,6 +82,7 @@ class MarketReport:
     requested_match: dict[str, Any] | None = None
     variant_groups: list[dict[str, Any]] = field(default_factory=list)
     lowest_starting_price: float | None = None
+    validation_summary: dict[str, int] = field(default_factory=dict)
     agent_trace: list[dict[str, Any]] = field(default_factory=list)
     summary: str = ""
 

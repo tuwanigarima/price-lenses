@@ -23,11 +23,17 @@ def verify_market_report(
 
     selected_fields = [
         (field, report.get(field))
-        for field in ("best_listed_offer", "best_unconditional_offer", "best_conditional_offer")
+        for field in (
+            "best_listed_offer",
+            "best_verified_offer",
+            "best_unconditional_offer",
+            "best_conditional_offer",
+        )
     ]
     for index, group in enumerate(report.get("variant_groups") or []):
         selected_fields.extend([
             (f"variant_groups[{index}].best_unconditional_offer", group.get("best_unconditional_offer")),
+            (f"variant_groups[{index}].best_verified_offer", group.get("best_verified_offer")),
             (f"variant_groups[{index}].best_conditional_offer", group.get("best_conditional_offer")),
         ])
 
@@ -39,6 +45,8 @@ def verify_market_report(
         if source is None:
             errors.append(f"{field} references unknown offer {offer_id}")
             continue
+        if selected.get("validation_status") != "VERIFIED":
+            errors.append(f"{field} selected an offer that is not VERIFIED")
         is_conditional = field.endswith("best_conditional_offer")
         if not is_conditional:
             actual = source.get("price")
@@ -73,6 +81,10 @@ def verify_market_report(
             float(ranked.get("unconditional_price") or 0), 2
         ):
             errors.append(f"ranked offer {ranked.get('offer_id')} has an ungrounded price")
+        if ranked.get("validation_status") not in {"VERIFIED", "PARTIAL"}:
+            errors.append(
+                f"ranked offer {ranked.get('offer_id')} has invalid validation status"
+            )
     forbidden = {"BUY_NOW", "WAIT", "BUY_ABROAD"}
     if forbidden.intersection(report.get("signals", [])):
         errors.append("Agent 2 returned a final purchase decision")
