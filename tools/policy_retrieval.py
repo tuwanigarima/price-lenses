@@ -6,6 +6,7 @@ from typing import Any, Protocol
 
 from .eligibility_models import PolicyHit
 from .policy_corpus import usable_policy_content
+from .policy_types import policy_keyword_query
 
 
 class Embedder(Protocol):
@@ -153,7 +154,7 @@ class HybridPolicyRetriever:
     ) -> list[PolicyHit]:
         candidate_limit = max(limit * 2, 12)
         lexical = self.database.keyword_policy_search(
-            question,
+            policy_keyword_query(tuple(policy_types or ())),
             retailers=retailers,
             policy_types=policy_types or [],
             product_category=product_category,

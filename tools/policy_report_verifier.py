@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .policy_types import chunk_supports_policy_type
+
 
 class PolicyReportVerificationError(ValueError):
     pass
@@ -46,8 +48,10 @@ def verify_policy_report(
                 cited.add(chunk_id)
                 if str(chunk.get("retailer") or "") != retailer:
                     errors.append(f"chunk {chunk_id} belongs to another retailer")
-                if str(chunk.get("policy_type") or "") != policy_type:
-                    errors.append(f"chunk {chunk_id} belongs to another policy type")
+                if not chunk_supports_policy_type(chunk, policy_type):
+                    errors.append(
+                        f"chunk {chunk_id} does not contain evidence for {policy_type}"
+                    )
 
     if int(report.get("evidence_chunk_count") or 0) != len(cited):
         errors.append("evidence_chunk_count does not match unique cited chunks")

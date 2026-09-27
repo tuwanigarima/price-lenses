@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from tools.policy_retrieval import HybridPolicyRetriever, build_policy_index
+from tools.policy_types import policy_keyword_query
 
 
 class FakeOpenAIEmbedder:
@@ -112,7 +113,11 @@ def test_pgvector_index_rejects_all_chunks_from_an_error_document():
 
 
 class RetrievalDatabase:
+    def __init__(self):
+        self.keyword_question = None
+
     def keyword_policy_search(self, *_args, **_kwargs):
+        self.keyword_question = _args[0]
         return [
             {"chunk_id": "11111111-1111-1111-1111-111111111111"},
             {"chunk_id": "22222222-2222-2222-2222-222222222222"},
@@ -144,8 +149,9 @@ class RetrievalDatabase:
 
 
 def test_hybrid_retriever_fuses_keyword_and_pgvector_results():
+    database = RetrievalDatabase()
     retriever = HybridPolicyRetriever(
-        RetrievalDatabase(), SimpleNamespace(), embedder=FakeOpenAIEmbedder()
+        database, SimpleNamespace(), embedder=FakeOpenAIEmbedder()
     )
 
     hits = retriever.search(
@@ -156,3 +162,12 @@ def test_hybrid_retriever_fuses_keyword_and_pgvector_results():
 
     assert len(hits) == 2
     assert all(hit.retrieval_sources == ("keyword", "semantic") for hit in hits)
+    assert database.keyword_question == "return OR refund"
+
+
+def test_policy_keyword_query_uses_or_across_requested_topics():
+    query = policy_keyword_query(("RETURN", "CANCELLATION", "WARRANTY"))
+
+    assert "return OR refund" in query
+    assert "cancellation OR cancel" in query
+    assert "warranty OR guarantee" in query

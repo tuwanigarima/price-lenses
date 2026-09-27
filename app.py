@@ -467,19 +467,27 @@ def render_policy_report(report: dict) -> None:
         "must be combined with Agent 2 evidence by the future synthesizer."
     )
 
-    with st.expander("How Agent 3 investigated retailer policies", expanded=True):
+    with st.expander("Agent 3 tool-call sequence", expanded=True):
         trace = report.get("agent_trace") or []
         if not trace:
             st.caption("No execution trace is available for this analysis.")
         for index, event in enumerate(trace, start=1):
+            status_icon = {
+                "completed": "✓",
+                "skipped": "○",
+                "fallback": "△",
+                "error": "✕",
+            }.get(event.get("status"), "•")
             st.markdown(
-                f"**{index}. {str(event.get('stage') or '').replace('_', ' ').title()}**"
+                f"**{index}. {status_icon} "
+                f"{str(event.get('stage') or '').replace('_', ' ').title()}** "
+                f"— {float(event.get('duration_ms') or 0):,.0f} ms"
             )
             st.caption(
                 f"Tool: {event.get('tool', '-')} · Source: {event.get('source', '-')} · "
-                f"Status: {event.get('status', 'unknown')} · "
-                f"{float(event.get('duration_ms') or 0):,.0f} ms"
+                f"Status: {event.get('status', 'unknown')}"
             )
+            st.caption(f"Input: {event.get('input_summary') or 'No input summary.'}")
             st.write(event.get("output_summary") or "No output summary.")
             if event.get("display_prompt"):
                 st.code(event["display_prompt"], language="text")

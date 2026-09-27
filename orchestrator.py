@@ -389,8 +389,21 @@ def policy_agent_node(state: PriceLensState):
         
     def a3_callback(event: dict):
         if a3_container:
+            status = event.get("status", "")
+            icon = {
+                "completed": "✓",
+                "skipped": "○",
+                "fallback": "△",
+                "error": "✕",
+            }.get(status, "•")
             stage = str(event.get('stage') or '').replace('_', ' ').title()
-            a3_container.markdown(f"**{stage}**  \n<small>{event.get('output_summary')}</small>", unsafe_allow_html=True)
+            a3_container.markdown(f"**{icon} {stage}**")
+            a3_container.caption(
+                f"Tool: {event.get('tool', '-')} · "
+                f"Source: {event.get('source', '-')} · "
+                f"Status: {event.get('status', 'unknown')}"
+            )
+            a3_container.caption(event.get("output_summary") or "No output summary.")
 
     database = None
     try:
@@ -402,6 +415,7 @@ def policy_agent_node(state: PriceLensState):
             freshness_minutes=settings.offer_freshness_minutes,
             enable_llm_summary=settings.llm_enabled,
             llm_settings=settings,
+            trace_callback=a3_callback,
         ).analyze(
             PolicyAgentRequest(
                 query=state.get("query", ""),

@@ -2,7 +2,7 @@
   {
     "retailer": "Amazon India",
     "policy_type": "RETURN",
-    "source_url": "https://www.amazon.in/gp/help/customer/display.html?nodeId=GKM69DUUYKQWKWX7",
+    "source_url": "https://www.amazon.in/gp/help/customer/display.html?nodeId=202111910",
     "source_authority": "AUTHORITATIVE",
     "approved_for_ingestion": true,
     "review_notes": "Official Amazon India help page; verify page title after first fetch."
@@ -18,15 +18,23 @@
   {
     "retailer": "Croma",
     "policy_type": "RETURN",
-    "source_url": "https://www.croma.com/lp-cancellation-and-return",
+    "source_url": "https://www.croma.com/cancellation-and-return",
     "source_authority": "AUTHORITATIVE",
     "approved_for_ingestion": true,
     "review_notes": "Official Croma cancellation and return page."
   },
   {
+    "retailer": "Croma",
+    "policy_type": "FAQ",
+    "source_url": "https://www.croma.com/faq",
+    "source_authority": "AUTHORITATIVE",
+    "approved_for_ingestion": true,
+    "review_notes": "Official Croma FAQ covering orders, cancellation, returns, replacements, and refunds."
+  },
+  {
     "retailer": "Reliance Digital",
     "policy_type": "RETURN",
-    "source_url": "https://www.reliancedigital.in/content/return-and-cancellation-policy",
+    "source_url": "https://www.reliancedigital.in/c/cancellation-and-return-policy",
     "source_authority": "AUTHORITATIVE",
     "approved_for_ingestion": true,
     "review_notes": "Official Reliance Digital policy candidate; fetch validation remains mandatory."
@@ -34,9 +42,9 @@
   {
     "retailer": "Vijay Sales",
     "policy_type": "RETURN",
-    "source_url": "https://www.vijaysales.com/return-and-cancellation-policy",
+    "source_url": "https://www.vijaysales.com/faqs.html",
     "source_authority": "AUTHORITATIVE",
-    "approved_for_ingestion": false,
-    "review_notes": "Candidate official URL; manually validate before enabling ingestion."
+    "approved_for_ingestion": true,
+    "review_notes": "Official Cancellation and Return link currently resolves to the Vijay Sales support page."
   }
 ]

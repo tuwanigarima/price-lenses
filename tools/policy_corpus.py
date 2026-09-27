@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ipaddress
 import io
+import os
 import re
 import socket
 from dataclasses import dataclass
@@ -114,26 +115,6 @@ def fetch_policy_document(
     minimum_characters: int = 200,
 ) -> FetchedPolicy:
     validate_policy_url(url, retailer, resolve_dns=True)
-<<<<<<< Updated upstream
-    response = requests.get(
-        url,
-        timeout=timeout,
-        allow_redirects=True,
-        headers={"User-Agent": "PriceLensPolicyIndexer/1.0 (+local-development)"},
-    )
-    final_url = validate_policy_url(response.url, retailer, resolve_dns=True)
-    response.raise_for_status()
-    content_type = response.headers.get("content-type", "").split(";", 1)[0].lower()
-    fallback_title = final_url.rstrip("/").rsplit("/", 1)[-1] or f"{retailer} policy"
-    if content_type == "application/pdf" or final_url.lower().endswith(".pdf"):
-        title, content = pdf_to_text(response.content, fallback_title)
-    else:
-        title, content = html_to_markdown(response.content, fallback_title)
-    if not usable_policy_content(content, minimum_characters=minimum_characters):
-        raise PolicyFetchError("Fetched document did not contain enough useful policy text")
-    return FetchedPolicy(final_url, title, content, content_type or "text/html", response.status_code)
-=======
-    
     try:
         response = requests.get(
             url,
@@ -149,38 +130,68 @@ def fetch_policy_document(
             title, content = pdf_to_text(response.content, fallback_title)
         else:
             title, content = html_to_markdown(response.content, fallback_title)
-            
-        if len(content.strip()) < minimum_characters:
-            raise ValueError("Too short")
-            
-        return FetchedPolicy(final_url, title, content, content_type or "text/html", response.status_code)
-    except Exception as e:
-        import os
+
+        if not usable_policy_content(content, minimum_characters=minimum_characters):
+            raise PolicyFetchError(
+                "Fetched document did not contain enough useful policy text"
+            )
+        return FetchedPolicy(
+            final_url,
+            title,
+            content,
+            content_type or "text/html",
+            response.status_code,
+        )
+    except (requests.RequestException, PolicyFetchError) as exc:
         if os.getenv("APIFY_API_TOKEN"):
             try:
-                print(f"  falling back to Apify for {retailer}...")
                 return _fetch_with_apify(url, retailer)
-            except Exception as apify_e:
-                raise PolicyFetchError(f"Standard fetch failed ({e}) and Apify fallback failed ({apify_e})")
-        raise PolicyFetchError(f"Fetched document failed or did not contain enough useful text: {e}")
+            except Exception as apify_exc:
+                raise PolicyFetchError(
+                    f"Standard fetch failed ({exc}) and Apify fallback failed "
+                    f"({apify_exc})"
+                ) from apify_exc
+        if isinstance(exc, PolicyFetchError):
+            raise
+        raise PolicyFetchError(f"Policy document request failed: {exc}") from exc
 
 
 def _fetch_with_apify(url: str, retailer: str) -> FetchedPolicy:
-    import os
     from apify_client import ApifyClient
+
+    validate_policy_url(url, retailer)
     token = os.getenv("APIFY_API_TOKEN")
     if not token:
         raise PolicyFetchError("APIFY_API_TOKEN is not set for fallback fetch")
     client = ApifyClient(token)
-    run = client.actor("apify/website-content-crawler").call(run_input={
-        "startUrls": [{"url": url}],
-        "maxCrawlPages": 1,
-    })
-    for item in client.dataset(run.default_dataset_id).iterate_items():
+    run = client.actor("apify/website-content-crawler").call(
+        run_input={
+            "startUrls": [{"url": url}],
+            "maxCrawlPages": 1,
+        }
+    )
+    if not run:
+        raise PolicyFetchError("Apify policy fetch returned no run")
+    dataset_id = _apify_dataset_id(run)
+    if not dataset_id:
+        raise PolicyFetchError("Apify policy fetch returned no dataset")
+    for item in client.dataset(dataset_id).iterate_items():
         text = item.get("text", "")
         title = item.get("metadata", {}).get("title", f"{retailer} policy")
-        if len(text.strip()) > 200:
+        if usable_policy_content(text, minimum_characters=200):
             return FetchedPolicy(url, title, text, "text/plain", 200)
     raise PolicyFetchError("Apify fetch did not return enough useful policy text")
 
->>>>>>> Stashed changes
+
+def _apify_dataset_id(run: object) -> str | None:
+    """Read a dataset ID from both apify-client Run objects and mappings."""
+    for attribute in ("default_dataset_id", "defaultDatasetId"):
+        value = getattr(run, attribute, None)
+        if value:
+            return str(value)
+    getter = getattr(run, "get", None)
+    if callable(getter):
+        value = getter("defaultDatasetId") or getter("default_dataset_id")
+        if value:
+            return str(value)
+    return None

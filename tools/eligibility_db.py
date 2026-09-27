@@ -390,7 +390,10 @@ class EligibilityDatabase:
             clauses.append("c.policy_type = ANY(%s)")
             params.append(type_values)
         if product_category:
-            clauses.append("(c.product_category IS NULL OR c.product_category = %s)")
+            clauses.append(
+                "(c.product_category IS NULL OR c.product_category='electronics' "
+                "OR c.product_category = %s)"
+            )
             params.append(product_category)
         if not include_parents:
             clauses.append("c.chunk_type <> 'PARENT'")
@@ -454,7 +457,10 @@ class EligibilityDatabase:
             clauses.append("c.policy_type = ANY(%s)")
             params.append(type_values)
         if product_category:
-            clauses.append("(c.product_category IS NULL OR c.product_category=%s)")
+            clauses.append(
+                "(c.product_category IS NULL OR c.product_category='electronics' "
+                "OR c.product_category=%s)"
+            )
             params.append(product_category)
         params.append(limit)
         return self._rows(
@@ -559,7 +565,10 @@ class EligibilityDatabase:
             clauses.append("c.policy_type = ANY(%s)")
             params.append(type_values)
         if product_category:
-            clauses.append("(c.product_category IS NULL OR c.product_category=%s)")
+            clauses.append(
+                "(c.product_category IS NULL OR c.product_category='electronics' "
+                "OR c.product_category=%s)"
+            )
             params.append(product_category)
         params.extend([vector, limit])
         return self._rows(

@@ -75,9 +75,38 @@ def test_agent3_builds_policy_profiles_without_reading_offers():
     assert "offer_id" not in str(report)
     assert database.context["offer_independent"] is True
     assert database.finished[1]["status"] == "partial"
-    assert report["agent_trace"][-1]["stage"] == "generate_policy_summary"
-    assert report["agent_trace"][-1]["status"] == "skipped"
-    assert "purchase-protection" in report["agent_trace"][-1]["display_prompt"]
+    stages = [event["stage"] for event in report["agent_trace"]]
+    assert stages[-3:] == [
+        "build_policy_profiles",
+        "generate_policy_summary",
+        "verify_policy_grounding",
+    ]
+    summary_event = report["agent_trace"][-2]
+    assert summary_event["status"] == "skipped"
+    assert "purchase-protection" in summary_event["display_prompt"]
+    assert report["agent_trace"][-1]["tool"] == "verify_policy_report"
+
+
+def test_agent3_streams_every_trace_event_to_callback():
+    streamed = []
+    report = PolicyProtectionAgent(
+        FakeDatabase(), FakeRetriever(), trace_callback=streamed.append
+    ).analyze(
+        PolicyAgentRequest(
+            query="phone",
+            retailers=("Flipkart",),
+            policy_types=("RETURN",),
+        )
+    )
+
+    assert streamed == report["agent_trace"]
+    assert [event["tool"] for event in streamed] == [
+        "search_retailer_policies",
+        "search_retailer_policies",
+        "classify_policy_coverage",
+        "summarize_policy_profiles",
+        "verify_policy_report",
+    ]
 
 
 def test_agent3_llm_policy_plan_preserves_every_required_retailer(monkeypatch):
@@ -136,3 +165,44 @@ def test_agent3_rejects_error_pages_as_policy_evidence():
             "the item is eligible and the customer supplies the required evidence."
         )
     }) is True
+
+
+def test_combined_policy_chunk_can_ground_explicit_topics_only():
+    chunk = {
+        "policy_type": "RETURN",
+        "heading_path": "Cancellation and replacement",
+        "content": (
+            "An order may be cancelled before dispatch. A defective product may be "
+            "replaced after verification."
+        ),
+    }
+
+    from tools.policy_types import chunk_supports_policy_type
+
+    assert chunk_supports_policy_type(chunk, "RETURN") is True
+    assert chunk_supports_policy_type(chunk, "CANCELLATION") is True
+    assert chunk_supports_policy_type(chunk, "REPLACEMENT") is True
+    assert chunk_supports_policy_type(chunk, "WARRANTY") is False
+
+
+def test_deterministic_summary_names_every_retailer_and_gap():
+    payload = {
+        "evidence_gap_count": 1,
+        "policy_profiles": [
+            {
+                "retailer": "Amazon India",
+                "policies": [{"policy_type": "RETURN", "status": "EVIDENCED"}],
+                "evidence_gaps": [],
+            },
+            {
+                "retailer": "Flipkart",
+                "policies": [{"policy_type": "FAQ", "status": "MISSING"}],
+                "evidence_gaps": ["FAQ"],
+            },
+        ],
+    }
+
+    summary = PolicyProtectionAgent._deterministic_summary(payload)
+
+    assert "Amazon India: evidenced RETURN; missing none" in summary
+    assert "Flipkart: evidenced none; missing FAQ" in summary
