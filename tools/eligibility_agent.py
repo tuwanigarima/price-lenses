@@ -26,12 +26,20 @@ class PolicyProtectionAgent:
         summary_writer: SummaryWriter | None = None,
         enable_llm_summary: bool = False,
         llm_settings: Any | None = None,
+        trace_callback: Any = None,
     ):
         self.database = database
         self.retriever = retriever
         self.summary_writer = summary_writer
         self.enable_llm_summary = enable_llm_summary
         self.llm_settings = llm_settings
+        self.trace_callback = trace_callback
+
+
+    def _append_trace(self, trace_list: list, event: dict):
+        trace_list.append(event)
+        if getattr(self, "trace_callback", None):
+            self.trace_callback(event)
 
     def analyze(self, request: PolicyAgentRequest) -> dict[str, Any]:
         trace: list[dict[str, Any]] = []
@@ -64,16 +72,14 @@ class PolicyProtectionAgent:
                     request, retailer, planned_search["question"]
                 )
                 hits.extend(retailer_hits)
-                trace.append(
-                    self._trace(
+                self._append_trace(trace, self._trace(
                         "retrieve_retailer_policy_evidence",
                         "PostgreSQL full-text + pgvector hybrid RAG",
                         started,
                         f"Retrieved {len(retailer_hits)} active policy chunks for {retailer}",
                         input_summary=(
                             f"{request.product_category}; "
-                            + ", ".join(request.policy_types)
-                        ),
+                            + ", ".join(request.policy_types)),
                     )
                 )
 
@@ -112,8 +118,7 @@ class PolicyProtectionAgent:
                 summary_source,
                 summary_output,
             ) = self._summary(report.to_dict())
-            trace.append(
-                {
+            self._append_trace(trace, {
                     **self._trace(
                         "generate_policy_summary",
                         "OpenAI-compatible chat model",
@@ -127,8 +132,7 @@ class PolicyProtectionAgent:
                     "source": summary_source,
                     "status": summary_status,
                     "display_prompt": self._summary_display_prompt(),
-                }
-            )
+                })
             report.agent_trace = trace
             active_chunks = self.database.policy_chunks_by_ids(cited_ids)
             verify_policy_report(report.to_dict(), active_chunks)
@@ -185,8 +189,7 @@ class PolicyProtectionAgent:
             "policy questions from memory."
         )
         if not self.enable_llm_summary or not self.llm_settings:
-            trace.append(
-                {
+            self._append_trace(trace, {
                     **self._trace(
                         "plan_policy_investigation",
                         "search_retailer_policies",
@@ -197,8 +200,7 @@ class PolicyProtectionAgent:
                     "source": "deterministic fallback",
                     "status": "skipped",
                     "display_prompt": display_prompt,
-                }
-            )
+                })
             return default
         try:
             from langchain_openai import ChatOpenAI
@@ -257,8 +259,7 @@ class PolicyProtectionAgent:
                 }
                 for item in default
             ]
-            trace.append(
-                {
+            self._append_trace(trace, {
                     **self._trace(
                         "plan_policy_investigation",
                         "search_retailer_policies",
@@ -269,12 +270,10 @@ class PolicyProtectionAgent:
                     "source": "llm",
                     "status": "completed",
                     "display_prompt": display_prompt,
-                }
-            )
+                })
             return searches
         except Exception as exc:
-            trace.append(
-                {
+            self._append_trace(trace, {
                     **self._trace(
                         "plan_policy_investigation",
                         "search_retailer_policies",

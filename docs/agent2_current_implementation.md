@@ -160,7 +160,8 @@ Before persistence, Agent 2 rejects provider records when they have:
 - No usable price or a non-positive price
 - A non-INR currency
 - Low product relevance
-- A recognized accessory title when the user requested the main product
+- A recognized accessory title when the user requested the 
+ product
 
 Product resolution uses identifiers in this order:
 

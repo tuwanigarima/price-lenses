@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS market_search_runs (
     run_id VARCHAR(32) PRIMARY KEY,
     query TEXT NOT NULL,
     provider VARCHAR(50) NOT NULL,
-    status VARCHAR(20) NOT NULL,
+    status VARCHAR(50) NOT NULL,
     error TEXT,
     result_count INTEGER NOT NULL DEFAULT 0 CHECK (result_count >= 0),
     started_at TIMESTAMPTZ NOT NULL,

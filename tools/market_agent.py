@@ -27,6 +27,7 @@ class MarketInvestigatorAgent:
         freshness: FreshnessPolicy | None = None,
         summary_writer: SummaryWriter | None = None,
         enable_llm_summary: bool = False,
+        trace_callback: Any = None,
     ):
         self.database = database
         self.providers = list(providers or [])
@@ -34,6 +35,7 @@ class MarketInvestigatorAgent:
         self.tools = MarketAgentTools(database, self.providers)
         self.summary_writer = summary_writer
         self.enable_llm_summary = enable_llm_summary
+        self.trace_callback = trace_callback
 
     def analyze(self, request: MarketAgentRequest, *, limit: int = 20) -> dict[str, Any]:
         started_at = perf_counter()
@@ -289,8 +291,8 @@ class MarketInvestigatorAgent:
         self._add_llm_summary(report)
         return report
 
-    @staticmethod
     def _trace_event(
+        self,
         *,
         stage: str,
         tool: str,
@@ -301,7 +303,7 @@ class MarketInvestigatorAgent:
         status: str = "completed",
         display_prompt: str | None = None,
     ) -> dict[str, Any]:
-        return {
+        event = {
             "stage": stage,
             "tool": tool,
             "status": status,
@@ -311,6 +313,9 @@ class MarketInvestigatorAgent:
             "duration_ms": round(max(0.0, duration_ms), 1),
             "display_prompt": display_prompt,
         }
+        if getattr(self, "trace_callback", None):
+            self.trace_callback(event)
+        return event
 
     @staticmethod
     def _provider_result_summary(runs: list[dict[str, Any]]) -> str:
