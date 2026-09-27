@@ -715,7 +715,8 @@ class MarketInvestigatorAgent:
                 display_prompt=self._summary_display_prompt(),
             ))
         except Exception as exc:  # deterministic report remains usable without the LLM
-            report["warnings"].append(f"LLM summary unavailable: {exc}")
+            failure_reason = self._llm_failure_reason(exc)
+            report["warnings"].append(f"LLM summary unavailable: {failure_reason}")
             report.setdefault("agent_trace", []).append(self._trace_event(
                 stage="prepare_user_summary",
                 tool="generate_market_summary",
@@ -725,7 +726,7 @@ class MarketInvestigatorAgent:
                 ),
                 output_summary=(
                     "LLM unavailable; deterministic summary retained "
-                    f"({type(exc).__name__})"
+                    f"({failure_reason})"
                 ),
                 duration_ms=(perf_counter() - started_at) * 1000,
                 status="fallback",
@@ -838,6 +839,7 @@ class MarketInvestigatorAgent:
             ))
             return planned
         except Exception as exc:
+            failure_reason = self._llm_failure_reason(exc)
             trace.append(self._trace_event(
                 stage="plan_market_investigation",
                 tool="plan_market_tools",
@@ -845,13 +847,30 @@ class MarketInvestigatorAgent:
                 input_summary=f"Provider policy {request.provider_policy}",
                 output_summary=(
                     "LLM planning unavailable; deterministic guarded plan used "
-                    f"({type(exc).__name__})"
+                    f"({failure_reason})"
                 ),
                 duration_ms=(perf_counter() - started_at) * 1000,
                 status="fallback",
                 display_prompt=display_prompt,
             ))
             return defaults
+
+    @staticmethod
+    def _llm_failure_reason(exc: Exception) -> str:
+        """Return a useful error without exposing request bodies or credentials."""
+        if isinstance(exc, ValueError):
+            return str(exc) or "invalid LLM configuration"
+        error_name = type(exc).__name__
+        safe_messages = {
+            "AuthenticationError": "OpenAI authentication failed; check OPENAI_API_KEY",
+            "PermissionDeniedError": "the OpenAI key cannot access the configured model",
+            "NotFoundError": "the configured OpenAI model or endpoint was not found",
+            "RateLimitError": "OpenAI rate limit or quota was exceeded",
+            "APITimeoutError": "the OpenAI request timed out",
+            "APIConnectionError": "could not connect to the OpenAI endpoint",
+            "BadRequestError": "OpenAI rejected the model request",
+        }
+        return safe_messages.get(error_name, error_name)
 
     @staticmethod
     def _llm_runtime_config() -> tuple[str, str, str]:

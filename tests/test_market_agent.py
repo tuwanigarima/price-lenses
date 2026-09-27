@@ -357,6 +357,25 @@ def test_agent2_uses_shared_openai_configuration_and_requires_a_key(monkeypatch)
     )
 
 
+def test_llm_failure_reason_explains_missing_key():
+    reason = MarketInvestigatorAgent._llm_failure_reason(
+        ValueError("OPENAI_API_KEY is required for OpenAI")
+    )
+
+    assert reason == "OPENAI_API_KEY is required for OpenAI"
+
+
+def test_llm_failure_reason_classifies_authentication_without_details():
+    AuthenticationError = type("AuthenticationError", (Exception,), {})
+
+    reason = MarketInvestigatorAgent._llm_failure_reason(
+        AuthenticationError("request contained secret material")
+    )
+
+    assert reason == "OpenAI authentication failed; check OPENAI_API_KEY"
+    assert "secret material" not in reason
+
+
 def test_agent2_llm_plan_cannot_override_database_only_policy(monkeypatch):
     import langchain_openai
 
