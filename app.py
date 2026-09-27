@@ -144,9 +144,6 @@ def render_history_results(result_state: dict) -> None:
         with st.container(border=True):
             eligibility_ui.render_eligibility_report(eligibility_report)
 
-    with st.container(border=True):
-        st.info("⏳ Review Intelligence Agent is pending implementation.")
-
 
 def render_history_tab() -> None:
     st.subheader("History & Purchase Timing")
