@@ -170,7 +170,7 @@ rule is never split across passages.
 To check search quality and tune the cut-off on your own index:
 
 ```bash
-python scripts/policies/eval_policy_questions.py              # built-in question set
+python scripts/policies/eval_policy_questions.py              # data/policies/eval_questions.json
 python scripts/policies/eval_policy_questions.py --questions my_questions.json
 ```
 

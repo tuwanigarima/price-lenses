@@ -201,6 +201,11 @@ def test_evaluation_reports_passes_and_misses(index, capsys):
     assert "MISS" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("path", [eval_policy_questions.DEFAULT_QUESTIONS_FILE, ROOT / "my_questions.json"])
+def test_question_files_are_valid(path):
+    questions = json.loads(path.read_text(encoding="utf-8"))
+    assert questions and all(item["question"].strip() for item in questions)
+    assert any(item.get("expect") == "no_match" for item in questions)
 def test_policy_llm_sends_no_temperature_unless_configured(monkeypatch):
     from tools import policy_rag
 
