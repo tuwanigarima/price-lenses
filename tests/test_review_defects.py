@@ -279,6 +279,7 @@ def test_agent_reports_defects(tmp_path, monkeypatch):
     report = run_eligibility_analysis(
         "B0TEST0001", "Samsung Galaxy S24 5G",
         offers_loader=offers, advisor_factory=advisor_factory(tmp_path), reviews_loader=lambda _id: reviews,
+        review_index_factory=None, summarizer_llm=None,
     )
     assert report["defects"]["reviews_analyzed"] == 44
     assert report["defect_warning"] == "Defects reported in reviews — Overheating: 4 of 44 reviews (9.1%)"

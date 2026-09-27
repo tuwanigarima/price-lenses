@@ -220,6 +220,39 @@ The results appear in the **🛡️ Policy & Seller Check** tab and, after a His
 analysis, in the Eligibility & Safety section. They are also in
 `eligibility_report` in the LangGraph state for the Decision Synthesizer.
 
+Review search by meaning (Chroma `raw_user_reviews`): reviews are split into
+passages and stored next to the policy index (`POLICY_CHROMA_DIR`, same
+`POLICY_EMBEDDINGS` backend). Agent 3 adds new reviews on each run; to index
+everything up front, or to write the review summary to
+`products.ai_reviews_summary`:
+
+```bash
+python scripts/reviews/build_review_index.py                 # index data/reviews/*.jsonl
+python scripts/reviews/build_review_index.py --summarize     # also save summaries (DATABASE_URL)
+python scripts/reviews/build_review_index.py --rebuild       # after changing POLICY_EMBEDDINGS
+```
+
+* **Similar complaints:** under each reported defect, up to three reviews that
+  describe it in other words ("warm like a stove" for overheating). They are
+  found by meaning, shown separately and never added to the defect's count.
+  Cut-off: `REVIEW_MIN_RELEVANCE` (0.35).
+* **Review summary:** passages are retrieved for praise (4-5★), complaints
+  (1-2★), battery, performance, camera/display/sound and build/value; the LLM
+  (`LLM_BASE_URL`) summarises only those passages with [n] citations, checked
+  like policy answers. Without an LLM, or if its answer is not grounded, a
+  counts-only summary (ratings and reported defects) is shown instead.
+* **Review sentiment (`S_sentiment`):** the average star rating on a 0-100
+  scale (neutral 50 with fewer than 5 rated reviews), minus 20 when overheating
+  or battery problems are reported.
+
+Deal Health Index: the Decision Synthesizer computes
+`DHI = 0.40 S_history + 0.25 S_competitor + 0.20 S_rating + 0.15 S_sentiment`.
+`S_competitor` is 100 when the tracked price is the cheapest in-stock offer
+from an acceptable seller (otherwise cheapest / tracked price x 100) and
+`S_rating` is the catalog star rating x 20. A factor without data is left out
+and the other weights are scaled up; the History tab shows the DHI with a
+breakdown of the factors used.
+
 ---
 
 ## 🧠 Key Features for Evaluators

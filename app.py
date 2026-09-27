@@ -79,7 +79,12 @@ def render_history_results(result_state: dict) -> None:
     metric_columns[0].metric("Current Price", f"₹{trend.get('current_price', 0):,.0f}")
     metric_columns[1].metric("All-Time Low", f"₹{trend.get('true_atl', 0):,.0f}")
     metric_columns[2].metric("30-Day Average", f"₹{trend.get('avg_30d', 0):,.0f}")
-    metric_columns[3].metric("DHI Score", f"{trend.get('s_history', 0)} / 100")
+    deal_health = (result_state.get("draft_verdict") or {}).get("deal_health") or {}
+    if deal_health.get("dhi") is not None:
+        metric_columns[3].metric("DHI Score", f"{deal_health['dhi']} / 100", deal_health["tier"], delta_color="off")
+        eligibility_ui.render_deal_health(deal_health)
+    else:
+        metric_columns[3].metric("DHI Score", f"{trend.get('s_history', 0)} / 100")
 
     verdict_column, chart_column = st.columns(2)
     with verdict_column:
@@ -143,9 +148,6 @@ def render_history_results(result_state: dict) -> None:
         st.subheader("🛡️ Eligibility & Safety")
         with st.container(border=True):
             eligibility_ui.render_eligibility_report(eligibility_report)
-
-    with st.container(border=True):
-        st.info("⏳ Review Intelligence Agent is pending implementation.")
 
 
 def render_history_tab() -> None:

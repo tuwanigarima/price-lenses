@@ -282,11 +282,15 @@ def eligibility_agent_node(state: PriceLensState):
 
 def decision_synthesizer_node(state: PriceLensState):
     """Node 4: LLM Synthesizes the 3 reports into a DraftVerdict"""
-    return {"draft_verdict": {"status": "Drafting LLM recommendation..."}}
+    from tools.deal_health import deal_health_from_reports
+
+    deal_health = deal_health_from_reports(state.get("history_report"), state.get("eligibility_report"))
+    return {"draft_verdict": {"status": "Drafting LLM recommendation...", "deal_health": deal_health}}
 
 def verifier_gate_node(state: PriceLensState):
     """Node 5: Deterministic Verifier validates the DraftVerdict"""
-    return {"final_verdict": {"status": "Verified safely", "dhi": 55.5, "stance": "WAIT"}}
+    deal_health = (state.get("draft_verdict") or {}).get("deal_health") or {}
+    return {"final_verdict": {"status": "Verified safely", "dhi": deal_health.get("dhi"), "stance": "WAIT"}}
 
 # ==========================================
 # 3. Build the Directed Acyclic Graph (DAG)

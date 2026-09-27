@@ -17,7 +17,8 @@ from typing import Callable
 
 from .policy_corpus import RETAILER_LABELS
 from .review_corpus import load_reviews
-from .review_defects import defect_summary, detect_defects
+from .review_defects import DEFECTS, defect_summary, detect_defects
+from .review_sentiment import review_sentiment
 from .return_windows import find_return_window, load_return_windows
 from .seller_check import OfferAssessment, check_sellers
 
@@ -129,6 +130,56 @@ def default_advisor():
     return PolicyAdvisor(PolicyIndex(embedder_from_env()))
 
 
+def default_review_index():
+    from .review_index import default_review_index as build
+
+    return build()
+
+
+def analyse_reviews(
+    canonical_id: str,
+    reviews: list,
+    defects: dict | None,
+    product_title: str | None,
+    review_index_factory: Callable[[], object] | None,
+    summarizer_llm="auto",
+) -> tuple[dict, dict, list[str]]:
+    """Semantic related mentions, sentiment and the review summary.
+
+    Returns (sentiment, summary, trace). The Chroma index is optional: without
+    it the defect counts, sentiment and a counts-only summary still work.
+    """
+    from .review_summary import ReviewSummarizer
+
+    trace: list[str] = []
+    sentiment = review_sentiment(reviews, defects)
+    trace.append(
+        f"Review sentiment: {sentiment['s_sentiment']}/100 ({sentiment['basis']}"
+        + (f"; -{sentiment['penalty']:g} for {', '.join(sentiment['penalty_reasons'])}" if sentiment["penalty"] else "")
+        + ")"
+    )
+    index = None
+    if reviews and review_index_factory is not None:
+        try:
+            index = review_index_factory()
+            synced = index.sync_product(canonical_id, reviews)
+            trace.append(
+                f"Review index ({index.embedder.name}): {synced['passages']} passages, "
+                f"{synced['added']} added, {synced['updated']} updated, {synced['removed']} removed"
+            )
+            by_key = {defect.key: defect for defect in DEFECTS}
+            for finding in (defects or {}).get("findings") or []:
+                finding["related_mentions"] = index.related_mentions(canonical_id, by_key[finding["defect"]])
+        except Exception as exc:
+            index = None
+            trace.append(f"Review index unavailable: {exc}")
+    summary = ReviewSummarizer(index, llm=summarizer_llm).summarize(
+        canonical_id, reviews, defects, product_title
+    ).to_dict()
+    trace.append(f"Review summary: mode={summary['mode']}" + (f", note: {summary['note']}" if summary["note"] else ""))
+    return sentiment, summary, trace
+
+
 def run_eligibility_analysis(
     canonical_id: str,
     product_title: str | None = None,
@@ -138,6 +189,8 @@ def run_eligibility_analysis(
     advisor_factory: Callable[[], object] = default_advisor,
     reviews_loader: Callable[[str], list] = load_reviews,
     return_windows_loader: Callable[[], list] | None = None,
+    review_index_factory: Callable[[], object] | None = default_review_index,
+    summarizer_llm="auto",
 ) -> dict:
     trace: list[str] = []
     errors: list[str] = []
@@ -220,6 +273,8 @@ def run_eligibility_analysis(
 
     # 3. Defects that many reviewers report (deterministic pattern scan).
     defects = None
+    sentiment = None
+    review_summary = None
     try:
         reviews = reviews_loader(canonical_id)
         defects = detect_defects(reviews, category)
@@ -227,6 +282,10 @@ def run_eligibility_analysis(
             f"Reviews: {defects['reviews_analyzed']} analysed, "
             f"{len(defects['findings'])} defects above threshold"
         )
+        sentiment, review_summary, review_trace = analyse_reviews(
+            canonical_id, reviews, defects, product_title, review_index_factory, summarizer_llm
+        )
+        trace.extend(review_trace)
     except Exception as exc:
         errors.append(f"Review analysis unavailable: {exc}")
         trace.append(f"Review analysis failed: {exc}")
@@ -267,6 +326,8 @@ def run_eligibility_analysis(
         "return_policy_warning": warning,
         "defects": defects,
         "defect_warning": defect_warning,
+        "sentiment": sentiment,
+        "review_summary": review_summary,
         "warnings": seller_report.warnings,
         "errors": errors,
         "agent_trace": trace,
