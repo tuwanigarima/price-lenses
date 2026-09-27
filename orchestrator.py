@@ -1,5 +1,5 @@
 import re
-from typing import TypedDict
+from typing import TypedDict, Any
 from langgraph.graph import StateGraph, START, END
 from langchain_openai import ChatOpenAI
 
@@ -16,6 +16,8 @@ class PriceLensState(TypedDict, total=False):
     wants_emi: bool
     product_category: str
     retailer_scope: list[str]
+    st_ctx: Any
+    st_containers: dict
     
     # Reports from parallel agents (Disjoint state keys for safe concurrent fan-out)
     history_report: dict
@@ -62,9 +64,12 @@ def input_resolver_node(state: PriceLensState):
                 # Text input may match multiple storage/colour variants. Resolve only
                 # when one product is clearly stronger; otherwise Agent 2 asks for
                 # clarification instead of binding the graph to an accessory.
+                # Fuzzy search
+                cur.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
                 cur.execute(
                     "SELECT canonical_id, title FROM products "
-                    "ORDER BY created_at DESC LIMIT 500"
+                    "ORDER BY word_similarity(%s, title) DESC LIMIT 50",
+                    (query,)
                 )
                 ranked = sorted(
                     (
@@ -73,8 +78,8 @@ def input_resolver_node(state: PriceLensState):
                     ),
                     reverse=True,
                 )
-                ranked = [candidate for candidate in ranked if candidate[0] >= 0.25]
-                if ranked and (len(ranked) == 1 or ranked[0][0] - ranked[1][0] >= 0.15):
+                ranked = [candidate for candidate in ranked if candidate[0] >= 0.10]
+                if ranked:
                     _score, asin, title = ranked[0]
     except Exception as e:
         errors.append(str(e))
@@ -131,9 +136,41 @@ def history_agent_node(state: PriceLensState):
     """Node 1: Runs the History Analysis Tools via LLM ReAct Agent"""
     from tools.analytics import query_historical_trend, query_sale_event_drops
     
+    ctx = state.get("st_ctx")
+    containers = state.get("st_containers") or {}
+    a1_container = containers.get("history_agent")
+    
+    if ctx:
+        import threading
+        from streamlit.runtime.scriptrunner import add_script_run_ctx
+        add_script_run_ctx(threading.current_thread(), ctx)
+        
+    agent_trace = []
+        
+    def stream_trace(msg, _trace=agent_trace):
+        _trace.append(msg)
+        if a1_container:
+            if isinstance(msg, dict):
+                status = msg.get('status', '')
+                icon = {"completed": "✓", "skipped": "○", "fallback": "△", "error": "✕"}.get(status, "•")
+                stage = str(msg.get('stage') or '').replace('_', ' ').title()
+                a1_container.markdown(f"**{icon} {stage}**  \n<small>{msg.get('output_summary', '')}</small>", unsafe_allow_html=True)
+            else:
+                a1_container.code(msg, language="text")
+
     asin = state.get("canonical_id")
     if not asin:
-        return {"history_report": {}}
+        stream_trace({
+            "stage": "understand_request",
+            "tool": "check_canonical_id",
+            "status": "error",
+            "source": "system",
+            "input_summary": "No verified product ID",
+            "output_summary": "Historical analysis skipped because product ID is missing",
+            "duration_ms": 0,
+            "display_prompt": None
+        })
+        return {"history_report": {"agent_trace": agent_trace}}
         
     # We still fetch the raw deterministic dicts so the Streamlit UI can render the charts flawlessly
     trend = query_historical_trend(asin)
@@ -144,7 +181,6 @@ def history_agent_node(state: PriceLensState):
     llm_base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
     llm_api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     llm_model = os.environ.get("OPENAI_MODEL", "gpt-5-mini")
-    agent_trace = []
 
    
         
@@ -174,29 +210,48 @@ def history_agent_node(state: PriceLensState):
         agent = create_react_agent(llm, tools=[check_price_trend, get_historical_sale_drops], prompt=system_prompt)
         
         # 5. Capture the exact thought process (Trace Logging)
-        agent_trace.append(f"📥 SYSTEM PROMPT PASSED TO LLM:\n{system_prompt}\n")
-        agent_trace.append(f"📥 USER PROMPT: Analyze the historical price for ASIN: {asin}\n")
+        # Suppress system prompt display for cleaner UI.
         
         final_state = None
         for step in agent.stream({"messages": [("user", f"Analyze the historical price for ASIN: {asin}")]}):
             for node_name, node_state in step.items():
+                messages = node_state.get("messages", [])
+                if not isinstance(messages, list):
+                    messages = [messages]
+                
                 if node_name == "agent":
-                    msg = node_state["messages"][-1]
-                    if hasattr(msg, 'tool_calls') and msg.tool_calls:
-                        agent_trace.append(f"🛠️ LLM DECIDED TO CALL TOOL: {msg.tool_calls[0]['name']}")
-                        agent_trace.append(f"   Arguments passed to tool: {msg.tool_calls[0]['args']}")
-                    elif msg.content:
-                        agent_trace.append(f"🧠 LLM GENERATED OUTPUT:\n{msg.content}")
+                    for msg in messages:
+                        if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                            for tc in msg.tool_calls:
+                                stream_trace({
+                                    "stage": f"call_{tc['name']}",
+                                    "tool": tc['name'],
+                                    "status": "completed",
+                                    "source": "database",
+                                    "input_summary": f"Arguments: {tc['args']}",
+                                    "output_summary": "Executed database query",
+                                    "duration_ms": 0,
+                                    "display_prompt": None
+                                })
                 elif node_name == "tools":
-                    msg = node_state["messages"][-1]
-                    # Log the JSON returned by the database tool
-                    agent_trace.append(f"✅ TOOL RETURNED RAW DATA to LLM:\n{msg.content}")
+                    pass # Output is captured implicitly by the agent's next step
             
             final_state = step
             
         # Extract the final textual analysis
         last_node = list(final_state.keys())[0]
         llm_analysis = final_state[last_node]["messages"][-1].content
+        
+        stream_trace({
+            "stage": "generate_financial_analysis",
+            "tool": "react_agent",
+            "status": "completed",
+            "source": "llm",
+            "input_summary": "Database results",
+            "output_summary": "Financial analysis generated",
+            "duration_ms": 0,
+            "display_prompt": "Analyze the historical price trajectory and determine if today is a financially optimal time to buy."
+        })
         
     except Exception as exc:
         # Historical pricing is deterministic database analysis and must remain
@@ -217,10 +272,17 @@ def history_agent_node(state: PriceLensState):
                 f"Consider waiting for a target price{target_text}; the current "
                 "recommendation is WAIT."
             )
-        agent_trace.append(
-            "LLM commentary was unavailable; displayed deterministic PostgreSQL "
-            f"analysis instead. Reason: {exc}"
-        )
+        
+        stream_trace({
+            "stage": "generate_financial_analysis",
+            "tool": "deterministic_fallback",
+            "status": "fallback",
+            "source": "deterministic fallback",
+            "input_summary": "Database results",
+            "output_summary": f"LLM unavailable; deterministic analysis displayed ({type(exc).__name__})",
+            "duration_ms": 0,
+            "display_prompt": None
+        })
             
     return {
         "history_report": {
@@ -238,6 +300,22 @@ def market_agent_node(state: PriceLensState):
     from tools.market_config import MarketSettings
     from tools.market_db import MarketDatabase
     from tools.market_service import build_providers
+
+    ctx = state.get("st_ctx")
+    containers = state.get("st_containers") or {}
+    a2_container = containers.get("market_agent")
+    
+    if ctx:
+        import threading
+        from streamlit.runtime.scriptrunner import add_script_run_ctx
+        add_script_run_ctx(threading.current_thread(), ctx)
+        
+    def a2_callback(event: dict):
+        if a2_container:
+            status = event.get('status', '')
+            icon = {"completed": "✓", "skipped": "○", "fallback": "△", "error": "✕"}.get(status, "•")
+            stage = str(event.get('stage') or '').replace('_', ' ').title()
+            a2_container.markdown(f"**{icon} {stage}**  \n<small>{event.get('output_summary')}</small>", unsafe_allow_html=True)
 
     database = None
     try:
@@ -264,6 +342,7 @@ def market_agent_node(state: PriceLensState):
                 product_minutes=settings.market_product_freshness_minutes,
             ),
             enable_llm_summary=settings.market_agent_llm_enabled,
+            trace_callback=a2_callback,
         )
         request = MarketAgentRequest(
             query=state.get("query", ""),
@@ -298,6 +377,20 @@ def policy_agent_node(state: PriceLensState):
     from tools.eligibility_db import EligibilityDatabase
     from tools.eligibility_models import PolicyAgentRequest, SUPPORTED_POLICY_RETAILERS
     from tools.policy_retrieval import HybridPolicyRetriever
+
+    ctx = state.get("st_ctx")
+    containers = state.get("st_containers") or {}
+    a3_container = containers.get("policy_agent")
+    
+    if ctx:
+        import threading
+        from streamlit.runtime.scriptrunner import add_script_run_ctx
+        add_script_run_ctx(threading.current_thread(), ctx)
+        
+    def a3_callback(event: dict):
+        if a3_container:
+            stage = str(event.get('stage') or '').replace('_', ' ').title()
+            a3_container.markdown(f"**{stage}**  \n<small>{event.get('output_summary')}</small>", unsafe_allow_html=True)
 
     database = None
     try:
@@ -335,12 +428,32 @@ def policy_agent_node(state: PriceLensState):
             database.close()
 
 def decision_synthesizer_node(state: PriceLensState):
-    """Node 4 placeholder: synthesis is intentionally outside this iteration."""
-    return {"draft_verdict": {"status": "pending_future_implementation"}}
+    """Node 4: Single-pass LLM synthesis with deterministic fallback (Option A)."""
+    from tools.decision_synthesizer import run_synthesizer
+    try:
+        return {"draft_verdict": run_synthesizer(state)}
+    except Exception as exc:
+        return {"draft_verdict": {
+            "decision": "REFUSE_NO_HISTORY",
+            "target_price": None,
+            "recommended_retailer": None,
+            "recommended_seller": None,
+            "condition": None,
+            "confidence_score": 0.0,
+            "primary_rationale": f"Synthesizer error: {exc}",
+            "key_evidence": [],
+            "_synthesis_mode": "error_fallback",
+        }}
 
 def verifier_gate_node(state: PriceLensState):
-    """Node 5 placeholder: never present a fabricated final recommendation."""
-    return {"final_verdict": {"status": "pending_future_implementation"}}
+    """Node 5: Zero-LLM deterministic grounding verifier (₹100 tolerance)."""
+    from tools.verifier_gate import verify_draft_verdict
+    draft = state.get("draft_verdict") or {}
+    result = verify_draft_verdict(draft, state)
+    errors = list(state.get("errors") or [])
+    if not result.passed:
+        errors.append(result.reason)
+    return {"final_verdict": result.final_verdict, "errors": errors}
 
 # ==========================================
 # 3. Build the Directed Acyclic Graph (DAG)

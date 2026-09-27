@@ -73,9 +73,20 @@ def render_history_results(result_state: dict) -> None:
             st.write("**History Agent analysis**")
             st.info(history_report["llm_analysis"])
         if history_report.get("agent_trace"):
-            with st.expander("View LLM tool trace"):
-                for log_entry in history_report["agent_trace"]:
-                    st.code(log_entry, language="text")
+            with st.expander("View Agent 1 trace", expanded=True):
+                for index, event in enumerate(history_report["agent_trace"], start=1):
+                    if isinstance(event, dict):
+                        status_icon = {
+                            "completed": "✓",
+                            "skipped": "○",
+                            "fallback": "△",
+                            "error": "✕",
+                        }.get(event.get("status"), "•")
+                        st.markdown(
+                            f"**{index}. {status_icon} {str(event.get('stage') or '').replace('_', ' ').title()}** "
+                        )
+                    else:
+                        st.code(str(event), language="text")
 
     with chart_column:
         st.subheader("Price Trajectory")
@@ -382,7 +393,7 @@ def render_market_agent_report(report: dict) -> None:
         )
     for warning in report.get("warnings") or []:
         st.warning(warning)
-    with st.expander("How Agent 2 investigated this product"):
+    with st.expander("How Agent 2 investigated this product", expanded=True):
         trace = report.get("agent_trace") or []
         if not trace:
             st.caption("No execution trace is available for this analysis.")
@@ -456,7 +467,7 @@ def render_policy_report(report: dict) -> None:
         "must be combined with Agent 2 evidence by the future synthesizer."
     )
 
-    with st.expander("How Agent 3 investigated retailer policies"):
+    with st.expander("How Agent 3 investigated retailer policies", expanded=True):
         trace = report.get("agent_trace") or []
         if not trace:
             st.caption("No execution trace is available for this analysis.")
@@ -477,11 +488,31 @@ def render_policy_report(report: dict) -> None:
 
 
 def run_unified_analysis(query: str, *, live_market: bool) -> dict | None:
+
+    from streamlit.runtime.scriptrunner import get_script_run_ctx
+    ctx = get_script_run_ctx()
+    
+    st.markdown("### 🔴 Live Agent Traces")
+    trace_cols = st.columns(3)
+    a1_container = trace_cols[0].container(height=400)
+    a1_container.caption("Agent 1 (History)")
+    a2_container = trace_cols[1].container(height=400)
+    a2_container.caption("Agent 2 (Market)")
+    a3_container = trace_cols[2].container(height=400)
+    a3_container.caption("Agent 3 (Policy)")
+
     initial_state = {
         "query": query,
         "force_market_refresh": live_market,
         "market_provider_policy": "api_first" if live_market else "database_only",
+        "st_ctx": ctx,
+        "st_containers": {
+            "history_agent": a1_container,
+            "market_agent": a2_container,
+            "policy_agent": a3_container,
+        }
     }
+
     result_state = initial_state.copy()
     completed_agents: set[str] = set()
     orchestration_trace: list[dict[str, str]] = []
@@ -507,9 +538,9 @@ def run_unified_analysis(query: str, *, live_market: bool) -> dict | None:
                     elif node_name == "input_resolver":
                         st.write("✅ Product input resolved")
                     elif node_name == "decision_synthesizer":
-                        st.write("ℹ️ Decision synthesizer is pending future implementation")
+                        st.write("✅ Decision synthesizer completed")
                     elif node_name == "verifier_gate":
-                        st.write("ℹ️ Final verifier is pending future implementation")
+                        st.write("✅ Final verifier completed")
             if len(completed_agents) != 3:
                 status.update(
                     label="Unified analysis incomplete", state="error", expanded=True
@@ -524,8 +555,10 @@ def run_unified_analysis(query: str, *, live_market: bool) -> dict | None:
             result_state["orchestration_trace"] = orchestration_trace
             return result_state
         except Exception as exc:
+            import traceback
+            traceback.print_exc()
             status.update(label="Unified analysis failed", state="error", expanded=True)
-            st.error(f"Unified analysis error: {exc}")
+            st.error(f"Unified analysis error: {exc}\n\n```\n{traceback.format_exc()}\n```")
             return None
 
 
@@ -533,7 +566,7 @@ def render_unified_tab() -> None:
     st.subheader("Unified Three-Agent Analysis")
     st.caption(
         "One product input launches History, Market, and Policy Protection agents in "
-        "parallel. The final cross-agent synthesizer is not implemented yet."
+        "parallel, followed by a decision synthesizer and grounding verifier."
     )
     with st.form("unified_analysis_form"):
         query = st.text_input(
@@ -575,12 +608,40 @@ def render_unified_tab() -> None:
     reports[2].metric(
         "Agent 3 · Policy", str(policy.get("status", "unknown")).title()
     )
-    st.info(
-        "Synthesizer: pending future implementation. No combined BUY/WAIT verdict "
-        "has been generated."
-    )
+    
+    final = result.get("final_verdict")
+    draft = result.get("draft_verdict")
+    
+    if final and final.get("decision"):
+        decision = final.get("decision")
+        color = "green" if decision == "BUY_NOW" else "orange" if decision == "WAIT" else "red"
+        
+        st.markdown("---")
+        st.subheader("🎯 Final Synthesized Verdict")
+        
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            st.markdown(f"<h2 style='text-align: center; color: {color};'>{decision.replace('_', ' ')}</h2>", unsafe_allow_html=True)
+            conf = final.get('confidence_score')
+            conf_display = f"{conf:.0%}" if isinstance(conf, (int, float)) else "0%"
+            st.metric("Confidence", conf_display)
+        
+        with col2:
+            target_price = final.get('target_price')
+            price_display = f"₹{target_price:,.0f}" if isinstance(target_price, (int, float)) else 'N/A'
+            st.markdown(f"**Target/Recommended Price:** {price_display}")
+            retailer = final.get('recommended_retailer') or 'N/A'
+            st.markdown(f"**Recommended Retailer:** {retailer}")
+            st.markdown(f"**Rationale:** {final.get('primary_rationale', '')}")
+            
+        if draft and draft != final:
+            st.warning("⚠️ The deterministic verifier gate modified the LLM's draft verdict to enforce grounding rules.")
+        st.markdown("---")
+    else:
+        st.warning("Synthesizer ran, but returned no final verdict.")
 
-    with st.expander("Unified execution flow"):
+
+    with st.expander("Unified execution flow", expanded=True):
         for index, event in enumerate(result.get("orchestration_trace") or [], start=1):
             st.markdown(
                 f"**{index}. {str(event.get('stage') or '').replace('_', ' ').title()}**"
@@ -598,12 +659,33 @@ def render_unified_tab() -> None:
             st.warning("Agent 1 found no usable historical evidence.")
             if history.get("llm_analysis"):
                 st.info(history["llm_analysis"])
-            with st.expander("View Agent 1 LLM and tool trace"):
+            with st.expander("View Agent 1 LLM and tool trace", expanded=True):
                 trace = history.get("agent_trace") or []
                 if not trace:
                     st.caption("No execution trace is available for this analysis.")
-                for log_entry in trace:
-                    st.code(log_entry, language="text")
+                for index, event in enumerate(trace, start=1):
+                    if isinstance(event, dict):
+                        status_icon = {
+                            "completed": "✓",
+                            "skipped": "○",
+                            "fallback": "△",
+                            "error": "✕",
+                        }.get(event.get("status"), "•")
+                        st.markdown(
+                            f"**{index}. {status_icon} {str(event.get('stage') or '').replace('_', ' ').title()}** "
+                            f"— {float(event.get('duration_ms') or 0):,.0f} ms"
+                        )
+                        st.caption(
+                            f"Tool: {event.get('tool', '-')} · Source: {event.get('source', '-')} · "
+                            f"Status: {event.get('status', 'unknown')}"
+                        )
+                        st.caption(f"Input: {event.get('input_summary') or 'No input summary.'}")
+                        st.write(event.get("output_summary") or "No result summary.")
+                        if event.get("display_prompt"):
+                            st.code(event["display_prompt"], language="text")
+                    else:
+                        # Fallback for old traces
+                        st.code(str(event), language="text")
     with market_results_tab:
         render_market_agent_report(market)
         try:

@@ -105,6 +105,7 @@ def pdf_to_text(value: bytes, fallback_title: str) -> tuple[str, str]:
     return fallback_title, "\n\n".join(page.strip() for page in pages if page.strip())
 
 
+
 def fetch_policy_document(
     url: str,
     retailer: str,
@@ -113,6 +114,7 @@ def fetch_policy_document(
     minimum_characters: int = 200,
 ) -> FetchedPolicy:
     validate_policy_url(url, retailer, resolve_dns=True)
+<<<<<<< Updated upstream
     response = requests.get(
         url,
         timeout=timeout,
@@ -130,3 +132,55 @@ def fetch_policy_document(
     if not usable_policy_content(content, minimum_characters=minimum_characters):
         raise PolicyFetchError("Fetched document did not contain enough useful policy text")
     return FetchedPolicy(final_url, title, content, content_type or "text/html", response.status_code)
+=======
+    
+    try:
+        response = requests.get(
+            url,
+            timeout=timeout,
+            allow_redirects=True,
+            headers={"User-Agent": "PriceLensPolicyIndexer/1.0 (+local-development)"},
+        )
+        final_url = validate_policy_url(response.url, retailer, resolve_dns=True)
+        response.raise_for_status()
+        content_type = response.headers.get("content-type", "").split(";", 1)[0].lower()
+        fallback_title = final_url.rstrip("/").rsplit("/", 1)[-1] or f"{retailer} policy"
+        if content_type == "application/pdf" or final_url.lower().endswith(".pdf"):
+            title, content = pdf_to_text(response.content, fallback_title)
+        else:
+            title, content = html_to_markdown(response.content, fallback_title)
+            
+        if len(content.strip()) < minimum_characters:
+            raise ValueError("Too short")
+            
+        return FetchedPolicy(final_url, title, content, content_type or "text/html", response.status_code)
+    except Exception as e:
+        import os
+        if os.getenv("APIFY_API_TOKEN"):
+            try:
+                print(f"  falling back to Apify for {retailer}...")
+                return _fetch_with_apify(url, retailer)
+            except Exception as apify_e:
+                raise PolicyFetchError(f"Standard fetch failed ({e}) and Apify fallback failed ({apify_e})")
+        raise PolicyFetchError(f"Fetched document failed or did not contain enough useful text: {e}")
+
+
+def _fetch_with_apify(url: str, retailer: str) -> FetchedPolicy:
+    import os
+    from apify_client import ApifyClient
+    token = os.getenv("APIFY_API_TOKEN")
+    if not token:
+        raise PolicyFetchError("APIFY_API_TOKEN is not set for fallback fetch")
+    client = ApifyClient(token)
+    run = client.actor("apify/website-content-crawler").call(run_input={
+        "startUrls": [{"url": url}],
+        "maxCrawlPages": 1,
+    })
+    for item in client.dataset(run.default_dataset_id).iterate_items():
+        text = item.get("text", "")
+        title = item.get("metadata", {}).get("title", f"{retailer} policy")
+        if len(text.strip()) > 200:
+            return FetchedPolicy(url, title, text, "text/plain", 200)
+    raise PolicyFetchError("Apify fetch did not return enough useful policy text")
+
+>>>>>>> Stashed changes
