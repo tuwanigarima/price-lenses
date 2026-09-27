@@ -35,6 +35,15 @@ def normalize_seller(value: str | None) -> str:
     return re.sub(r"[^a-z0-9]+", " ", (value or "").lower()).strip()
 
 
+def _vector_literal(values: Iterable[float], *, dimensions: int = 1536) -> str:
+    vector = [float(value) for value in values]
+    if len(vector) != dimensions:
+        raise ValueError(
+            f"embedding has {len(vector)} dimensions; expected {dimensions}"
+        )
+    return json.dumps(vector, separators=(",", ":"))
+
+
 class EligibilityDatabase:
     def __init__(self, database_url: str, *, verify_schema: bool = True):
         if not database_url:
@@ -387,8 +396,8 @@ class EligibilityDatabase:
             clauses.append("c.chunk_type <> 'PARENT'")
         return self._rows(
             f"""
-            SELECT c.*, s.source_url, d.retrieved_at, d.effective_from,
-                   d.effective_until
+            SELECT c.*, s.source_url, d.content_text AS document_content,
+                   d.retrieved_at, d.effective_from, d.effective_until
             FROM policy_chunks c
             JOIN policy_document_versions d
               ON d.document_version_id = c.document_version_id
@@ -405,8 +414,9 @@ class EligibilityDatabase:
             return {}
         rows = self._rows(
             """
-            SELECT c.*, s.source_url, d.is_active AS document_is_active,
-                   d.retrieved_at, d.effective_from, d.effective_until
+            SELECT c.*, s.source_url, d.content_text AS document_content,
+                   d.is_active AS document_is_active, d.retrieved_at,
+                   d.effective_from, d.effective_until
             FROM policy_chunks c
             JOIN policy_document_versions d
               ON d.document_version_id = c.document_version_id
@@ -461,6 +471,128 @@ class EligibilityDatabase:
             """,
             tuple(params),
         )
+
+    # ---------------------------------------------------------- vector data
+    def policy_embedding_hashes(
+        self, embedding_model: str, chunk_ids: Iterable[str]
+    ) -> dict[str, str]:
+        ids = list(dict.fromkeys(str(value) for value in chunk_ids if value))
+        if not ids:
+            return {}
+        rows = self._rows(
+            """
+            SELECT chunk_id, embedded_content_sha256
+            FROM policy_chunk_embeddings
+            WHERE embedding_model=%s AND chunk_id = ANY(%s::uuid[])
+            """,
+            (embedding_model, ids),
+        )
+        return {
+            str(row["chunk_id"]): str(row["embedded_content_sha256"])
+            for row in rows
+        }
+
+    def upsert_policy_embeddings(
+        self,
+        rows: Iterable[dict[str, Any]],
+        *,
+        dimensions: int = 1536,
+    ) -> int:
+        values = list(rows)
+        if not values:
+            return 0
+        changed = 0
+        with self.connection:
+            with self.connection.cursor() as cursor:
+                for row in values:
+                    cursor.execute(
+                        """
+                        INSERT INTO policy_chunk_embeddings (
+                            chunk_id, embedding_model, embedding_dimensions,
+                            embedded_content_sha256, embedding
+                        ) VALUES (%s,%s,%s,%s,%s::vector)
+                        ON CONFLICT (chunk_id, embedding_model) DO UPDATE SET
+                            embedding_dimensions=EXCLUDED.embedding_dimensions,
+                            embedded_content_sha256=EXCLUDED.embedded_content_sha256,
+                            embedding=EXCLUDED.embedding,
+                            updated_at=CURRENT_TIMESTAMP
+                        WHERE policy_chunk_embeddings.embedded_content_sha256
+                              IS DISTINCT FROM EXCLUDED.embedded_content_sha256
+                           OR policy_chunk_embeddings.embedding_dimensions
+                              IS DISTINCT FROM EXCLUDED.embedding_dimensions
+                        """,
+                        (
+                            row["chunk_id"],
+                            row["embedding_model"],
+                            dimensions,
+                            row["content_sha256"],
+                            _vector_literal(row["embedding"], dimensions=dimensions),
+                        ),
+                    )
+                    changed += cursor.rowcount
+        return changed
+
+    def semantic_policy_search(
+        self,
+        query_embedding: Iterable[float],
+        *,
+        embedding_model: str,
+        retailers: Iterable[str],
+        policy_types: Iterable[str] = (),
+        product_category: str | None = None,
+        limit: int = 12,
+        dimensions: int = 1536,
+    ) -> list[dict[str, Any]]:
+        vector = _vector_literal(query_embedding, dimensions=dimensions)
+        retailer_values = list(dict.fromkeys(retailers))
+        type_values = list(dict.fromkeys(policy_types))
+        clauses = [
+            "c.is_active", "d.is_active", "s.approved_for_ingestion",
+            "c.token_count >= 50", "e.embedding_model=%s",
+        ]
+        # The similarity expression occurs before the WHERE placeholders.
+        params: list[Any] = [vector, embedding_model]
+        if retailer_values:
+            clauses.append("c.retailer = ANY(%s)")
+            params.append(retailer_values)
+        if type_values:
+            clauses.append("c.policy_type = ANY(%s)")
+            params.append(type_values)
+        if product_category:
+            clauses.append("(c.product_category IS NULL OR c.product_category=%s)")
+            params.append(product_category)
+        params.extend([vector, limit])
+        return self._rows(
+            f"""
+            SELECT c.chunk_id,
+                   1 - (e.embedding <=> %s::vector) AS semantic_score
+            FROM policy_chunk_embeddings e
+            JOIN policy_chunks c ON c.chunk_id = e.chunk_id
+            JOIN policy_document_versions d
+              ON d.document_version_id = c.document_version_id
+            JOIN policy_sources s ON s.source_id = d.source_id
+            WHERE {' AND '.join(clauses)}
+            ORDER BY e.embedding <=> %s::vector
+            LIMIT %s
+            """,
+            tuple(params),
+        )
+
+    def policy_embedding_count(self, embedding_model: str) -> int:
+        rows = self._rows(
+            """
+            SELECT COUNT(*) AS count
+            FROM policy_chunk_embeddings e
+            JOIN policy_chunks c ON c.chunk_id=e.chunk_id
+            JOIN policy_document_versions d
+              ON d.document_version_id=c.document_version_id
+            JOIN policy_sources s ON s.source_id=d.source_id
+            WHERE e.embedding_model=%s AND c.is_active AND d.is_active
+              AND s.approved_for_ingestion
+            """,
+            (embedding_model,),
+        )
+        return int(rows[0]["count"]) if rows else 0
 
     # ------------------------------------------------------------- manifests
     def active_manifest(self, corpus_type: str = "POLICY") -> dict[str, Any] | None:

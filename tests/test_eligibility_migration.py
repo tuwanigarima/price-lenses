@@ -18,3 +18,18 @@ def test_agent3_migration_is_additive_and_contains_required_tables():
     assert "drop table" not in sql
     assert "truncate " not in sql
     assert "delete from" not in sql
+
+
+def test_pgvector_migration_only_adds_embedding_storage():
+    sql = (
+        Path(__file__).parents[1]
+        / "scripts/db/migrations/003_pgvector_policy_embeddings.sql"
+    ).read_text().lower()
+
+    assert "create extension if not exists vector" in sql
+    assert "create table if not exists policy_chunk_embeddings" in sql
+    assert "embedding vector(1536)" in sql
+    assert "alter table" not in sql
+    assert "drop table" not in sql
+    assert "truncate " not in sql
+    assert "delete from" not in sql

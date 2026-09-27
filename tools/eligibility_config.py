@@ -14,18 +14,20 @@ def _boolean(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _direct_neon_url(value: str | None) -> str | None:
+    url = (value or "").strip()
+    if not url:
+        return None
+    return url.replace("-pooler.", ".", 1)
+
+
 @dataclass(frozen=True)
 class EligibilitySettings:
     database_url: str
-    chroma_host: str = "localhost"
-    chroma_port: int = 8000
-    chroma_tenant: str = "default_tenant"
-    chroma_database: str = "price_lenses"
-    policy_collection_prefix: str = "retailer_policy_chunks"
-    review_collection_prefix: str = "product_review_chunks"
-    embedding_backend: str = "local"
-    embedding_model: str = "local-token-hash-v1"
-    embedding_dimensions: int = 384
+    database_direct_url: str | None = None
+    embedding_backend: str = "openai"
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dimensions: int = 1536
     embedding_base_url: str = "https://api.openai.com/v1"
     embedding_api_key: str | None = None
     llm_enabled: bool = False
@@ -42,26 +44,24 @@ class EligibilitySettings:
         ).strip()
         if not database_url:
             raise ValueError("DATABASE_URL is required for Agent 3")
-        backend = os.getenv("POLICY_EMBEDDINGS", "local").strip().lower()
-        if backend not in {"local", "openai", "hash"}:
-            raise ValueError("POLICY_EMBEDDINGS must be local, openai, or hash")
+        backend = os.getenv("POLICY_EMBEDDINGS", "openai").strip().lower()
+        if backend != "openai":
+            raise ValueError("POLICY_EMBEDDINGS must be openai")
+        dimensions = int(os.getenv("POLICY_EMBEDDING_DIMENSIONS", "1536"))
+        if dimensions != 1536:
+            raise ValueError(
+                "POLICY_EMBEDDING_DIMENSIONS must be 1536 for the pgvector schema"
+            )
         return cls(
             database_url=database_url,
-            chroma_host=os.getenv("CHROMA_HOST", "localhost").strip(),
-            chroma_port=int(os.getenv("CHROMA_PORT", "8000")),
-            chroma_tenant=os.getenv("CHROMA_TENANT", "default_tenant").strip(),
-            chroma_database=os.getenv("CHROMA_DATABASE", "price_lenses").strip(),
-            policy_collection_prefix=os.getenv(
-                "CHROMA_POLICY_COLLECTION_PREFIX", "retailer_policy_chunks"
-            ).strip(),
-            review_collection_prefix=os.getenv(
-                "CHROMA_REVIEW_COLLECTION_PREFIX", "product_review_chunks"
-            ).strip(),
+            database_direct_url=_direct_neon_url(
+                os.getenv("DATABASE_DIRECT_URL") or os.getenv("PL_NEON_DIRECT_URL")
+            ),
             embedding_backend=backend,
             embedding_model=os.getenv(
-                "POLICY_EMBEDDING_MODEL", "local-token-hash-v1"
+                "POLICY_EMBEDDING_MODEL", "text-embedding-3-small"
             ).strip(),
-            embedding_dimensions=int(os.getenv("POLICY_EMBEDDING_DIMENSIONS", "384")),
+            embedding_dimensions=dimensions,
             embedding_base_url=os.getenv(
                 "POLICY_EMBEDDING_BASE_URL", "https://api.openai.com/v1"
             ).strip(),

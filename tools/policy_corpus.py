@@ -26,6 +26,23 @@ class PolicyFetchError(RuntimeError):
     pass
 
 
+_UNUSABLE_POLICY_MARKERS = (
+    "we cannot find the page",
+    "page not found",
+    "access denied",
+    "verify you are human",
+    "captcha",
+    "temporarily unavailable",
+)
+
+
+def usable_policy_content(value: str, *, minimum_characters: int = 80) -> bool:
+    content = " ".join((value or "").lower().split())
+    return len(content) >= minimum_characters and not any(
+        marker in content for marker in _UNUSABLE_POLICY_MARKERS
+    )
+
+
 @dataclass(frozen=True)
 class FetchedPolicy:
     url: str
@@ -110,6 +127,6 @@ def fetch_policy_document(
         title, content = pdf_to_text(response.content, fallback_title)
     else:
         title, content = html_to_markdown(response.content, fallback_title)
-    if len(content.strip()) < minimum_characters:
+    if not usable_policy_content(content, minimum_characters=minimum_characters):
         raise PolicyFetchError("Fetched document did not contain enough useful policy text")
     return FetchedPolicy(final_url, title, content, content_type or "text/html", response.status_code)

@@ -20,7 +20,7 @@ graph TD
     
     Node0 --> Agent1[1. History Analyst<br/>PostgreSQL Time-Series]
     Node0 --> Agent2[2. Market Investigator<br/>SerpAPI/Apify + PostgreSQL]
-    Node0 --> Agent3[3. Policy & Purchase Protection Analyst<br/>PostgreSQL + Chroma policy RAG]
+    Node0 --> Agent3[3. Policy & Purchase Protection Analyst<br/>PostgreSQL + pgvector policy RAG]
     
     Agent1 --> Node4[4. Decision Synthesizer<br/>future implementation]
     Agent2 --> Node4
@@ -41,7 +41,7 @@ graph TD
 ### 3. Policy & Purchase Protection Analyst
 * **Role:** Compares retailer-level return, replacement, cancellation, warranty,
   and FAQ evidence without reading or ranking Agent 2 offers.
-* **Tools:** Uses hybrid PostgreSQL full-text/Chroma retrieval over approved
+* **Tools:** Uses hybrid PostgreSQL full-text/pgvector retrieval over approved
   official India retailer policy documents, followed by citation verification.
 
 ### 4. Decision Synthesizer (future)
@@ -54,8 +54,8 @@ graph TD
 * **Orchestration:** LangGraph, LangChain
 * **LLM Engine:** Optional OpenAI-compatible guarded tool planning and summaries;
   deterministic execution and fallbacks
-* **Database:** Local PostgreSQL (`psycopg2`)
-* **Vector Store:** Local ChromaDB (derived/rebuildable policy index)
+* **Database:** Neon PostgreSQL (`psycopg2`), with local PostgreSQL for tests
+* **Vector Store:** Neon PostgreSQL with pgvector
 * **UI/Frontend:** Streamlit, Plotly Express
 
 ---
@@ -79,22 +79,26 @@ pip install -r requirements.txt
 ### 3. Start local data services and configure `.env`
 
 ```bash
-docker compose up -d postgres chroma
+docker compose up -d postgres
 cp .env.example .env
 ```
 
-The local runtime database setting is:
+Use the pooled Neon URI at runtime and the direct URI for migrations, policy
+ingestion, and embedding builds:
 
 ```env
-DATABASE_URL=postgresql://pricelens:pricelens_local@localhost:5433/pricelens
-CHROMA_HOST=localhost
-CHROMA_PORT=8000
-CHROMA_DATABASE=price_lenses
+DATABASE_URL=postgresql://user:password@ep-example-pooler.region.aws.neon.tech/neondb?sslmode=require
+DATABASE_DIRECT_URL=postgresql://user:password@ep-example.region.aws.neon.tech/neondb?sslmode=require
+TEST_DATABASE_URL=postgresql://pricelens:pricelens_local@localhost:5433/pricelens
 
 # One server-side key is shared by all three agents.
 OPENAI_API_KEY=your_openai_project_key
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-5-mini
+
+POLICY_EMBEDDINGS=openai
+POLICY_EMBEDDING_MODEL=text-embedding-3-small
+POLICY_EMBEDDING_DIMENSIONS=1536
 
 MARKET_AGENT_LLM_ENABLED=true
 MARKET_AGENT_LLM_BASE_URL=https://api.openai.com/v1
@@ -105,11 +109,12 @@ ELIGIBILITY_AGENT_LLM_BASE_URL=https://api.openai.com/v1
 ELIGIBILITY_AGENT_LLM_MODEL=gpt-5-mini
 ```
 
-Keep provider/LLM keys only in `.env`, which is ignored by Git. Initialize the
-base schema and apply both additive migrations:
+Keep provider/LLM keys only in `.env`, which is ignored by Git. For a new local
+database, initialize the base schema and apply the additive migrations. For an
+existing Neon PriceLens database, run only the migration command after reviewing
+the unapplied SQL files:
 
 ```bash
-python scripts/db/init_db.py
 python scripts/db/migrate.py
 ```
 
@@ -147,12 +152,13 @@ with configured Flipkart and bank-offer actors.
 
 ### 6. Build and test Agent 3 locally
 
-Register approved policy sources, fetch immutable versions, and build Chroma:
+Register approved policy sources, fetch immutable versions into Neon, and build
+OpenAI embeddings in pgvector:
 
 ```bash
 python scripts/policies/seed_sources.py
 python scripts/policies/fetch_documents.py
-python scripts/policies/build_chroma_index.py
+python scripts/policies/build_pgvector_index.py
 python scripts/policies/validate_policy_index.py "Can I return a defective phone?" --retailer Flipkart
 ```
 
@@ -176,7 +182,8 @@ turn aggregate ATL/ATH values into invented dated `price_history` rows; Agent 1
 uses those aggregates transparently when no dated series exists.
 
 `policy_sources` records fetch failures instead of activating unusable content.
-PostgreSQL remains canonical; Chroma can always be rebuilt from active chunks.
+`policy_chunks` remains canonical; pgvector rows can always be rebuilt from
+active chunks without copying data from Chroma.
 
 ---
 

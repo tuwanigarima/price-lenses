@@ -17,11 +17,22 @@ def _checksum(contents: bytes) -> str:
     return hashlib.sha256(contents).hexdigest()
 
 
+def _direct_connection_url(value: str) -> str:
+    return value.replace("-pooler.", ".", 1)
+
+
 def main() -> None:
     load_dotenv()
-    database_url = os.getenv("DATABASE_URL", "").strip()
+    database_url = _direct_connection_url(
+        (
+            os.getenv("DATABASE_DIRECT_URL")
+            or os.getenv("PL_NEON_DIRECT_URL")
+            or os.getenv("DATABASE_URL")
+            or ""
+        ).strip()
+    )
     if not database_url:
-        raise SystemExit("DATABASE_URL is required")
+        raise SystemExit("DATABASE_DIRECT_URL or DATABASE_URL is required")
 
     files = sorted(MIGRATIONS.glob("*.sql"))
     if not files:

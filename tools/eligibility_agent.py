@@ -7,6 +7,7 @@ from time import perf_counter
 from typing import Any, Callable
 
 from .eligibility_models import PolicyAgentRequest, PolicyHit, PolicyProtectionReport
+from .policy_corpus import usable_policy_content
 from .policy_report_verifier import verify_policy_report
 
 
@@ -66,7 +67,7 @@ class PolicyProtectionAgent:
                 trace.append(
                     self._trace(
                         "retrieve_retailer_policy_evidence",
-                        "PostgreSQL + Chroma hybrid RAG",
+                        "PostgreSQL full-text + pgvector hybrid RAG",
                         started,
                         f"Retrieved {len(retailer_hits)} active policy chunks for {retailer}",
                         input_summary=(
@@ -161,16 +162,7 @@ class PolicyProtectionAgent:
 
     @staticmethod
     def _usable_policy_hit(hit: dict[str, Any]) -> bool:
-        content = " ".join(str(hit.get("content") or "").lower().split())
-        blocked = (
-            "we cannot find the page",
-            "page not found",
-            "access denied",
-            "verify you are human",
-            "captcha",
-            "temporarily unavailable",
-        )
-        return len(content) >= 80 and not any(marker in content for marker in blocked)
+        return usable_policy_content(str(hit.get("content") or ""))
 
     def _plan_policy_searches(
         self, request: PolicyAgentRequest, trace: list[dict[str, Any]]

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a read-only retrieval smoke test against the active policy index."""
+"""Run a read-only retrieval smoke test against Neon pgvector policy data."""
 from __future__ import annotations
 
 import argparse

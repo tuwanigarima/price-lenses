@@ -21,7 +21,8 @@ def main() -> None:
     parser.add_argument("--source-id", action="append", default=[])
     args = parser.parse_args()
     settings = EligibilitySettings.from_env()
-    with EligibilityDatabase(settings.database_url) as database:
+    database_url = settings.database_direct_url or settings.database_url
+    with EligibilityDatabase(database_url) as database:
         for source in database.sources_for_fetch(args.source_id):
             source_id = str(source["source_id"])
             try:
