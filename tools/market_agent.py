@@ -54,6 +54,7 @@ class MarketInvestigatorAgent:
             ),
             duration_ms=(perf_counter() - started_at) * 1000,
         )]
+        planned_tools = self._plan_market_tools(request, trace)
         provider_runs: list[dict[str, Any]] = []
         warnings: list[str] = []
         selected: list[Any] = []
@@ -234,6 +235,20 @@ class MarketInvestigatorAgent:
             output_summary=f"Created {len(variant_groups)} verified exact-variant groups",
             duration_ms=(perf_counter() - grouping_started) * 1000,
         ))
+        validation = report.get("validation_summary") or {}
+        trace.append(self._trace_event(
+            stage="validate_commercial_offers",
+            tool="validate_offer_snapshot",
+            source="deterministic",
+            input_summary=f"{len(snapshot.get('offers') or [])} normalized offers",
+            output_summary=(
+                f"{validation.get('verified', 0)} verified, "
+                f"{validation.get('partial', 0)} partial, "
+                f"{validation.get('stale', 0)} stale, and "
+                f"{validation.get('rejected', 0)} rejected"
+            ),
+            duration_ms=0,
+        ))
         report["variant_options"] = [
             {
                 key: option.get(key)
@@ -245,6 +260,7 @@ class MarketInvestigatorAgent:
             for option in snapshot.get("variant_options", [])
         ]
         report["unresolved_variant_fields"] = []
+        report["planned_tools"] = planned_tools
         report["refresh"] = {
             "policy": request.provider_policy,
             "requested": request.force_refresh or request.provider_policy == "api_first",
@@ -399,6 +415,7 @@ class MarketInvestigatorAgent:
                 "canonical_ids": sorted(bucket["canonical_ids"]),
                 "variant": bucket["variant"],
                 "best_unconditional_offer": variant_report.get("best_unconditional_offer"),
+                "best_verified_offer": variant_report.get("best_verified_offer"),
                 "best_conditional_offer": variant_report.get("best_conditional_offer"),
                 "ranked_offers": variant_report.get("ranked_offers") or [],
                 "coverage": variant_report.get("coverage") or {},
@@ -410,6 +427,7 @@ class MarketInvestigatorAgent:
                 ),
                 "missing_inputs": variant_report.get("missing_inputs") or [],
                 "evidence": variant_report.get("evidence") or [],
+                "validation_summary": variant_report.get("validation_summary") or {},
             }
             groups.append(group)
         tier_order = {
@@ -461,15 +479,29 @@ class MarketInvestigatorAgent:
             group["best_conditional_offer"] for group in groups
             if group.get("best_conditional_offer")
         ]
+        lowest_starting_price = min(
+            (item["price"] for item in unconditional), default=None
+        )
+        validation_totals = {
+            status: sum(
+                int((group.get("validation_summary") or {}).get(status) or 0)
+                for group in groups
+            )
+            for status in ("verified", "partial", "stale", "rejected")
+        }
         verified = sorted({
             retailer
             for group in groups
             for retailer in group.get("coverage", {}).get("verified_retailers", [])
         })
         report = {
-            "schema_version": "1.1",
+            "schema_version": "1.2",
             "agent": "market_investigator",
-            "status": "complete" if len(verified) == len(SUPPORTED_RETAILERS) else "partial",
+            "status": (
+                "complete"
+                if unconditional and len(verified) == len(SUPPORTED_RETAILERS)
+                else "partial" if unconditional else "insufficient_evidence"
+            ),
             "product": product,
             "analysis_timestamp": datetime.now(timezone.utc).isoformat(),
             "provider_runs": provider_runs,
@@ -480,11 +512,15 @@ class MarketInvestigatorAgent:
             },
             "freshness": primary.get("freshness") or {},
             "best_listed_offer": min(unconditional, key=lambda item: item["price"], default=None),
+            "best_verified_offer": min(unconditional, key=lambda item: item["price"], default=None),
             "best_unconditional_offer": min(unconditional, key=lambda item: item["price"], default=None),
             "best_conditional_offer": min(conditional, key=lambda item: item["price"], default=None),
             "ranked_offers": all_ranked,
             "upcoming_sales": sales,
-            "signals": ["BEST_CURRENT_VERIFIED_PRICE"],
+            "signals": (
+                ["BEST_CURRENT_VERIFIED_PRICE"]
+                if unconditional else ["INSUFFICIENT_EVIDENCE"]
+            ),
             "confidence": round(sum(
                 len(group.get("coverage", {}).get("verified_retailers", []))
                 for group in groups
@@ -506,18 +542,21 @@ class MarketInvestigatorAgent:
             "requested_attributes": requested_attributes,
             "requested_match": requested_match,
             "variant_groups": groups,
-            "lowest_starting_price": min(item["price"] for item in unconditional),
+            "lowest_starting_price": lowest_starting_price,
+            "validation_summary": validation_totals,
             "summary": (
                 f"{product.get('title') or 'This product'} starts at "
-                f"₹{min(item['price'] for item in unconditional):,.0f} across "
+                f"₹{lowest_starting_price:,.0f} across "
                 f"{len(groups)} verified variant{'s' if len(groups) != 1 else ''}."
+                if lowest_starting_price is not None
+                else "No commercially verified current offer was available; partial listings are shown separately."
             ),
         }
         if requested_attributes and not requested_match:
             report["warnings"].append(
                 "The exact requested configuration was not verified; closest same-product variants are shown."
             )
-        elif requested_match:
+        elif requested_match and requested_match.get("best_unconditional_offer"):
             exact = requested_match.get("best_unconditional_offer") or {}
             report["summary"] = (
                 f"The requested variant is available from ₹{float(exact['price']):,.0f} "
@@ -702,29 +741,134 @@ class MarketInvestigatorAgent:
             "assess seller safety, or make BUY NOW / WAIT decisions."
         )
 
+    def _plan_market_tools(
+        self, request: MarketAgentRequest, trace: list[dict[str, Any]]
+    ) -> list[str]:
+        started_at = perf_counter()
+        defaults = {
+            "api_first": [
+                "search_current_market",
+                "load_stored_market_data",
+                "validate_offer_snapshot",
+            ],
+            "database_first": [
+                "load_stored_market_data",
+                "search_current_market_if_stale",
+                "validate_offer_snapshot",
+            ],
+            "database_only": [
+                "load_stored_market_data",
+                "validate_offer_snapshot",
+            ],
+        }[request.provider_policy]
+        display_prompt = (
+            "Plan the Agent 2 investigation using only the supplied tools. Respect the "
+            "provider policy: database_only forbids live search; api_first requires it; "
+            "database_first permits it only for stale or incomplete evidence. Never "
+            "calculate a price or invent a promotion."
+        )
+        if not self.enable_llm_summary:
+            trace.append(self._trace_event(
+                stage="plan_market_investigation",
+                tool="plan_market_tools",
+                source="deterministic fallback",
+                input_summary=f"Provider policy {request.provider_policy}",
+                output_summary="LLM planning disabled; deterministic guarded plan used",
+                duration_ms=(perf_counter() - started_at) * 1000,
+                status="skipped",
+                display_prompt=display_prompt,
+            ))
+            return defaults
+        try:
+            base_url, api_key, model = self._llm_runtime_config()
+            from langchain_openai import ChatOpenAI
+
+            tool_names = [
+                "search_current_market",
+                "load_stored_market_data",
+                "search_current_market_if_stale",
+                "validate_offer_snapshot",
+            ]
+            schemas = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "description": f"Request the guarded Agent 2 stage: {name}.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {},
+                            "additionalProperties": False,
+                        },
+                    },
+                }
+                for name in tool_names
+            ]
+            llm = ChatOpenAI(
+                base_url=base_url,
+                api_key=api_key,
+                model=model,
+                timeout=20,
+                max_retries=1,
+            ).bind_tools(schemas)
+            response = llm.invoke(
+                display_prompt
+                + f"\nProvider policy: {request.provider_policy}"
+                + f"\nProduct request: {request.query}"
+            )
+            proposed = [
+                str(call.get("name"))
+                for call in (getattr(response, "tool_calls", []) or [])
+                if call.get("name") in tool_names
+            ]
+            allowed = set(defaults)
+            guarded = [name for name in proposed if name in allowed]
+            planned = list(dict.fromkeys([*guarded, *defaults]))
+            trace.append(self._trace_event(
+                stage="plan_market_investigation",
+                tool="plan_market_tools",
+                source="llm",
+                input_summary=f"Provider policy {request.provider_policy}",
+                output_summary=(
+                    f"LLM proposed {len(proposed)} tool calls; guarded plan: "
+                    + ", ".join(planned)
+                ),
+                duration_ms=(perf_counter() - started_at) * 1000,
+                display_prompt=display_prompt,
+            ))
+            return planned
+        except Exception as exc:
+            trace.append(self._trace_event(
+                stage="plan_market_investigation",
+                tool="plan_market_tools",
+                source="deterministic fallback",
+                input_summary=f"Provider policy {request.provider_policy}",
+                output_summary=(
+                    "LLM planning unavailable; deterministic guarded plan used "
+                    f"({type(exc).__name__})"
+                ),
+                duration_ms=(perf_counter() - started_at) * 1000,
+                status="fallback",
+                display_prompt=display_prompt,
+            ))
+            return defaults
+
     @staticmethod
     def _llm_runtime_config() -> tuple[str, str, str]:
         """Resolve Agent 2 LLM settings without affecting the History Agent."""
         base_url = (
             os.getenv("MARKET_AGENT_LLM_BASE_URL")
-            or os.getenv("LLM_BASE_URL")
+            or os.getenv("OPENAI_BASE_URL")
             or "https://api.openai.com/v1"
         ).strip()
-        api_key = (
-            os.getenv("MARKET_AGENT_LLM_API_KEY")
-            or os.getenv("OPENAI_API_KEY")
-            or os.getenv("LLM_API_KEY")
-            or ""
-        ).strip()
+        api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
         model = (
             os.getenv("MARKET_AGENT_LLM_MODEL")
-            or os.getenv("LLM_MODEL")
-            or "gpt-6-luna"
+            or os.getenv("OPENAI_MODEL")
+            or "gpt-5-mini"
         ).strip()
         if "api.openai.com" in base_url and api_key in {"", "not-needed"}:
-            raise ValueError(
-                "MARKET_AGENT_LLM_API_KEY (or OPENAI_API_KEY) is required for OpenAI"
-            )
+            raise ValueError("OPENAI_API_KEY is required for OpenAI")
         return base_url, api_key or "not-needed", model
 
     @staticmethod

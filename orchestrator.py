@@ -10,14 +10,17 @@ class PriceLensState(TypedDict, total=False):
     product_title: str
     deadline_days: int
     force_market_refresh: bool
+    market_provider_policy: str
     bank: str
     card_type: str
     wants_emi: bool
+    product_category: str
+    retailer_scope: list[str]
     
     # Reports from parallel agents (Disjoint state keys for safe concurrent fan-out)
     history_report: dict
     market_report: dict
-    eligibility_report: dict
+    policy_report: dict
     
     # Final outputs
     draft_verdict: dict
@@ -76,7 +79,37 @@ def input_resolver_node(state: PriceLensState):
     except Exception as e:
         errors.append(str(e))
     
-    return {"canonical_id": asin, "product_title": title, "errors": errors}
+    category_text = f"{query} {title}".lower()
+    category_rules = (
+        ("smartphone", ("phone", "iphone", "galaxy", "pixel", "mobile")),
+        ("laptop", ("laptop", "macbook", "notebook")),
+        ("television", ("television", " tv ", "smart tv")),
+        ("tablet", ("tablet", "ipad")),
+        ("smartwatch", ("watch", "smartwatch")),
+        ("audio", ("headphone", "earbud", "speaker", "soundbar")),
+        ("camera", ("camera", "dslr", "mirrorless")),
+    )
+    product_category = next(
+        (
+            category
+            for category, keywords in category_rules
+            if any(keyword in f" {category_text} " for keyword in keywords)
+        ),
+        "electronics",
+    )
+    return {
+        "canonical_id": asin,
+        "product_title": title,
+        "product_category": product_category,
+        "retailer_scope": [
+            "Amazon India",
+            "Flipkart",
+            "Croma",
+            "Reliance Digital",
+            "Vijay Sales",
+        ],
+        "errors": errors,
+    }
 
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
@@ -102,28 +135,26 @@ def history_agent_node(state: PriceLensState):
     if not asin:
         return {"history_report": {}}
         
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    # if not api_key:
-    #     raise ValueError("PRODUCTION SECURITY FAULT: GEMINI_API_KEY is missing. The autonomous LLM ReAct Agent cannot run without it.")
-        
     # We still fetch the raw deterministic dicts so the Streamlit UI can render the charts flawlessly
     trend = query_historical_trend(asin)
     drops = {}
     if trend.get("historical_stance") == "WAIT":
         drops = query_sale_event_drops(asin)
 
-    LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://127.0.0.1:5001/gateway/mlflow/v1")
-    LLM_API_KEY  = os.environ.get("LLM_API_KEY", "not-needed")
-    LLM_MODEL    = os.environ.get("LLM_MODEL",    "gemini")
+    llm_base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    llm_api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    llm_model = os.environ.get("OPENAI_MODEL", "gpt-5-mini")
     agent_trace = []
 
    
         
     try:
+        if not llm_api_key:
+            raise ValueError("OPENAI_API_KEY is not configured")
         llm = ChatOpenAI(
-                base_url=LLM_BASE_URL,
-                api_key=LLM_API_KEY,
-                model=LLM_MODEL,
+                base_url=llm_base_url,
+                api_key=llm_api_key,
+                model=llm_model,
         )
 
         # result = llm.invoke("crack a joke");
@@ -239,7 +270,7 @@ def market_agent_node(state: PriceLensState):
             canonical_id=state.get("canonical_id"),
             deadline_days=int(state.get("deadline_days", 30)),
             force_refresh=bool(state.get("force_market_refresh", False)),
-            provider_policy=settings.market_provider_policy,
+            provider_policy=state.get("market_provider_policy") or settings.market_provider_policy,
             bank=state.get("bank"),
             card_type=state.get("card_type"),
             wants_emi=state.get("wants_emi"),
@@ -260,17 +291,56 @@ def market_agent_node(state: PriceLensState):
         if database is not None:
             database.close()
 
-def eligibility_agent_node(state: PriceLensState):
-    """Node 3: Runs Eligibility Tools (Stub)"""
-    return {"eligibility_report": {"status": "Pending implementation"}}
+def policy_agent_node(state: PriceLensState):
+    """Node 3: retrieve retailer policy evidence independently of offers."""
+    from tools.eligibility_agent import PolicyProtectionAgent
+    from tools.eligibility_config import EligibilitySettings
+    from tools.eligibility_db import EligibilityDatabase
+    from tools.eligibility_models import PolicyAgentRequest, SUPPORTED_POLICY_RETAILERS
+    from tools.policy_retrieval import HybridPolicyRetriever
+
+    database = None
+    try:
+        settings = EligibilitySettings.from_env()
+        database = EligibilityDatabase(settings.database_url)
+        report = PolicyProtectionAgent(
+            database,
+            HybridPolicyRetriever(database, settings),
+            freshness_minutes=settings.offer_freshness_minutes,
+            enable_llm_summary=settings.llm_enabled,
+            llm_settings=settings,
+        ).analyze(
+            PolicyAgentRequest(
+                query=state.get("query", ""),
+                canonical_id=state.get("canonical_id"),
+                product_category=state.get("product_category") or "electronics",
+                retailers=tuple(
+                    state.get("retailer_scope") or SUPPORTED_POLICY_RETAILERS
+                ),
+            )
+        )
+        return {"policy_report": report}
+    except Exception as exc:
+        return {
+            "policy_report": {
+                "schema_version": "2.0",
+                "agent": "policy_purchase_protection_analyst",
+                "status": "error",
+                "warnings": [str(exc)],
+                "summary": "Retailer policy analysis could not be completed.",
+            }
+        }
+    finally:
+        if database is not None:
+            database.close()
 
 def decision_synthesizer_node(state: PriceLensState):
-    """Node 4: LLM Synthesizes the 3 reports into a DraftVerdict"""
-    return {"draft_verdict": {"status": "Drafting LLM recommendation..."}}
+    """Node 4 placeholder: synthesis is intentionally outside this iteration."""
+    return {"draft_verdict": {"status": "pending_future_implementation"}}
 
 def verifier_gate_node(state: PriceLensState):
-    """Node 5: Deterministic Verifier validates the DraftVerdict"""
-    return {"final_verdict": {"status": "Verified safely", "dhi": 55.5, "stance": "WAIT"}}
+    """Node 5 placeholder: never present a fabricated final recommendation."""
+    return {"final_verdict": {"status": "pending_future_implementation"}}
 
 # ==========================================
 # 3. Build the Directed Acyclic Graph (DAG)
@@ -280,15 +350,18 @@ builder = StateGraph(PriceLensState)
 builder.add_node("input_resolver", input_resolver_node)
 builder.add_node("history_agent", history_agent_node)
 builder.add_node("market_agent", market_agent_node)
-builder.add_node("eligibility_agent", eligibility_agent_node)
+builder.add_node("policy_agent", policy_agent_node)
 builder.add_node("decision_synthesizer", decision_synthesizer_node)
 builder.add_node("verifier_gate", verifier_gate_node)
 
 builder.add_edge(START, "input_resolver")
 builder.add_edge("input_resolver", "history_agent")
 builder.add_edge("input_resolver", "market_agent")
-builder.add_edge("input_resolver", "eligibility_agent")
-builder.add_edge(["history_agent", "market_agent", "eligibility_agent"], "decision_synthesizer")
+builder.add_edge("input_resolver", "policy_agent")
+builder.add_edge(
+    ["history_agent", "market_agent", "policy_agent"],
+    "decision_synthesizer",
+)
 builder.add_edge("decision_synthesizer", "verifier_gate")
 builder.add_edge("verifier_gate", END)
 

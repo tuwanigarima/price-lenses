@@ -17,6 +17,25 @@ services:
       timeout: 5s
       retries: 10
 
+  chroma:
+    image: chromadb/chroma:1.5.9
+    container_name: pricelens-chroma
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - pricelens_chroma_data:/data
+    healthcheck:
+      # The minimal Chroma image has bash but no Python/curl/wget. A TCP probe
+      # verifies that the local service is accepting connections.
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8000'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
 volumes:
   # A distinct volume name preserves any older Agent 2 local database volume.
   pricelens_main_pgdata:
+  # Chroma is a derived index, but its local volume avoids rebuilding it after
+  # every normal container restart.
+  pricelens_chroma_data:

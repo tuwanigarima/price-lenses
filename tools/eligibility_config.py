@@ -1,0 +1,82 @@
+"""Environment configuration for the local-first Eligibility Agent."""
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+
+from dotenv import load_dotenv
+
+
+def _boolean(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+@dataclass(frozen=True)
+class EligibilitySettings:
+    database_url: str
+    chroma_host: str = "localhost"
+    chroma_port: int = 8000
+    chroma_tenant: str = "default_tenant"
+    chroma_database: str = "price_lenses"
+    policy_collection_prefix: str = "retailer_policy_chunks"
+    review_collection_prefix: str = "product_review_chunks"
+    embedding_backend: str = "local"
+    embedding_model: str = "local-token-hash-v1"
+    embedding_dimensions: int = 384
+    embedding_base_url: str = "https://api.openai.com/v1"
+    embedding_api_key: str | None = None
+    llm_enabled: bool = False
+    llm_base_url: str = "https://api.openai.com/v1"
+    llm_api_key: str | None = None
+    llm_model: str = "gpt-6-luna"
+    offer_freshness_minutes: int = 60
+
+    @classmethod
+    def from_env(cls) -> "EligibilitySettings":
+        load_dotenv()
+        database_url = (
+            os.getenv("DATABASE_URL") or os.getenv("PL_DATABASE_URL") or ""
+        ).strip()
+        if not database_url:
+            raise ValueError("DATABASE_URL is required for Agent 3")
+        backend = os.getenv("POLICY_EMBEDDINGS", "local").strip().lower()
+        if backend not in {"local", "openai", "hash"}:
+            raise ValueError("POLICY_EMBEDDINGS must be local, openai, or hash")
+        return cls(
+            database_url=database_url,
+            chroma_host=os.getenv("CHROMA_HOST", "localhost").strip(),
+            chroma_port=int(os.getenv("CHROMA_PORT", "8000")),
+            chroma_tenant=os.getenv("CHROMA_TENANT", "default_tenant").strip(),
+            chroma_database=os.getenv("CHROMA_DATABASE", "price_lenses").strip(),
+            policy_collection_prefix=os.getenv(
+                "CHROMA_POLICY_COLLECTION_PREFIX", "retailer_policy_chunks"
+            ).strip(),
+            review_collection_prefix=os.getenv(
+                "CHROMA_REVIEW_COLLECTION_PREFIX", "product_review_chunks"
+            ).strip(),
+            embedding_backend=backend,
+            embedding_model=os.getenv(
+                "POLICY_EMBEDDING_MODEL", "local-token-hash-v1"
+            ).strip(),
+            embedding_dimensions=int(os.getenv("POLICY_EMBEDDING_DIMENSIONS", "384")),
+            embedding_base_url=os.getenv(
+                "POLICY_EMBEDDING_BASE_URL", "https://api.openai.com/v1"
+            ).strip(),
+            embedding_api_key=(os.getenv("OPENAI_API_KEY") or "").strip() or None,
+            llm_enabled=_boolean("ELIGIBILITY_AGENT_LLM_ENABLED"),
+            llm_base_url=os.getenv(
+                "ELIGIBILITY_AGENT_LLM_BASE_URL",
+                os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+            ).strip(),
+            llm_api_key=(os.getenv("OPENAI_API_KEY") or "").strip() or None,
+            llm_model=os.getenv(
+                "ELIGIBILITY_AGENT_LLM_MODEL",
+                os.getenv("OPENAI_MODEL", "gpt-5-mini"),
+            ).strip(),
+            offer_freshness_minutes=int(
+                os.getenv("ELIGIBILITY_OFFER_FRESHNESS_MINUTES", "60")
+            ),
+        )
