@@ -131,14 +131,70 @@ def render_defects(defects: dict | None) -> None:
         with st.expander(title):
             st.caption("Seen on " + ", ".join(finding["sources"]))
             for example in finding["examples"]:
-                meta = " · ".join(
-                    part for part in (
-                        example["source"], example.get("date"),
-                        f"{example['rating']:g}★" if example.get("rating") else None,
-                    ) if part
-                )
-                link = f" [open]({example['url']})" if example.get("url") else ""
-                st.markdown(f"> {example['snippet']}\n\n{meta}{link}")
+                _quote(example)
+            related = finding.get("related_mentions") or []
+            if related:
+                st.caption("Similar complaints found by meaning (not counted above):")
+                for example in related:
+                    _quote(example)
+
+
+def _quote(example: dict) -> None:
+    meta = " · ".join(
+        part for part in (
+            example["source"], example.get("date"),
+            f"{example['rating']:g}★" if example.get("rating") else None,
+        ) if part
+    )
+    link = f" [open]({example['url']})" if example.get("url") else ""
+    st.markdown(f"> {example['snippet']}\n\n{meta}{link}")
+
+
+SUMMARY_MODE_LABELS = {
+    "llm": "Summary written from the review passages below",
+    "extractive": "Review counts (no generated summary)",
+}
+
+
+def render_review_summary(summary: dict | None, sentiment: dict | None) -> None:
+    if not summary or summary.get("mode") == "none":
+        return
+    st.markdown("**What reviewers say**")
+    st.caption(SUMMARY_MODE_LABELS.get(summary["mode"], summary["mode"]))
+    st.markdown(summary["summary"])
+    if summary.get("note"):
+        st.caption(f"ℹ️ {summary['note']}")
+    if sentiment:
+        text = f"Review sentiment: **{sentiment['s_sentiment']:g} / 100** ({sentiment['basis']}"
+        if sentiment.get("penalty"):
+            text += f"; −{sentiment['penalty']:g} for {', '.join(sentiment['penalty_reasons']).lower()}"
+        st.markdown(text + ")")
+    citations = summary.get("citations") or []
+    if citations:
+        with st.expander(f"Review passages ({len(citations)})"):
+            for hit in citations:
+                meta = " · ".join(part for part in (
+                    hit["source"], hit.get("date"), f"{hit['rating']:g}★" if hit.get("rating") else None,
+                ) if part)
+                link = f" [open]({hit['url']})" if hit.get("url") else ""
+                st.markdown(f"**[{hit['number']}]** {hit['text']}\n\n{meta}{link}")
+
+
+def render_deal_health(deal_health: dict) -> None:
+    with st.expander(f"How the DHI is calculated ({deal_health['tier']})"):
+        rows = [
+            {"Factor": part["label"], "Score": part["score"], "Weight": f"{part['weight']:.0%}",
+             "Points": part["points"]}
+            for part in deal_health["components"].values()
+        ]
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+        if deal_health.get("missing"):
+            from .deal_health import LABELS
+
+            st.caption(
+                "No data for: " + ", ".join(LABELS[name] for name in deal_health["missing"])
+                + ". The other weights were scaled up to sum to 100%."
+            )
 
 
 def render_eligibility_report(report: dict) -> None:
@@ -179,6 +235,7 @@ def render_eligibility_report(report: dict) -> None:
         for retailer, answer in policies.items():
             with st.expander(RETAILER_LABELS.get(retailer, retailer.title()), expanded=len(policies) == 1):
                 render_policy_answer(answer)
+    render_review_summary(report.get("review_summary"), report.get("sentiment"))
     render_defects(report.get("defects"))
     if report.get("user_policy_answer"):
         st.markdown("**Your policy question**")

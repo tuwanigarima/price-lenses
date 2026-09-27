@@ -37,11 +37,15 @@ def query_historical_trend(canonical_id: str) -> dict:
         conn = get_db_connection()
         with conn.cursor() as cur:
             # 1. Get current price
-            cur.execute("SELECT current_price FROM products WHERE canonical_id = %s", (canonical_id,))
+            cur.execute(
+                "SELECT current_price, customer_rating FROM products WHERE canonical_id = %s",
+                (canonical_id,),
+            )
             prod_row = cur.fetchone()
             if not prod_row or not prod_row[0]:
                 return {"error": f"Product {canonical_id} or current_price not found."}
             current_price = float(prod_row[0])
+            customer_rating = float(prod_row[1]) if prod_row[1] is not None else None
 
             # 2. Get Overall Stats from history
             cur.execute("""
@@ -56,6 +60,7 @@ def query_historical_trend(canonical_id: str) -> dict:
                 return {
                     "canonical_id": canonical_id,
                     "current_price": current_price,
+                    "customer_rating": customer_rating,
                     "true_atl": current_price,
                     "true_ath": current_price,
                     "total_history_days": 0,
@@ -103,6 +108,7 @@ def query_historical_trend(canonical_id: str) -> dict:
             return {
                 "canonical_id": canonical_id,
                 "current_price": current_price,
+                "customer_rating": customer_rating,
                 "true_atl": true_atl,
                 "true_ath": true_ath,
                 "avg_30d": round(avg_30d, 2),
