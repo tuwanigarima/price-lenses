@@ -1,18 +1,36 @@
-# 🔍 PriceLens: Autonomous Agentic RAG Advisor
+# PriceLens — System Design and Implementation
 
 PriceLens is a multi-agent India e-commerce analysis system. It combines stored
 price history, current offers from SerpAPI/Apify, and grounded retailer-policy
-evidence. Agents 1–3 are available; the cross-agent decision synthesizer remains
-an explicit future stage and does not currently emit a final combined verdict.
+evidence. Three specialist agents run in parallel, followed by a decision
+synthesizer and a deterministic verifier. The Streamlit dashboard displays the
+combined recommendation alongside the specialist reports and execution traces.
 
-Built as an **Agentic RAG** pipeline using **LangGraph**, PriceLens eschews traditional sequential LLM wrappers in favor of a highly parallelized Directed Acyclic Graph (DAG) architecture.
+This document describes the current executable implementation. Earlier design
+plans may describe features or rules that differ from the running code.
+
+## Project Purpose and Scope
+
+PriceLens helps shoppers compare three aspects of an electronics purchase:
+
+- **Timing:** How does the current price compare with stored historical prices?
+- **Market value:** Which matching retailer offers and promotions are available?
+- **Purchase protection:** What do saved retailer policies say about returns,
+  replacements, refunds, cancellations, and warranties?
+
+The supported retailer scope is Amazon India, Flipkart, Croma, Reliance Digital,
+and Vijay Sales. Actual coverage depends on provider results and the approved
+policy corpus. PriceLens provides advice; checkout, payments, order tracking,
+and autonomous purchasing are outside the implemented workflow.
 
 ---
 
-## 🏗️ The Multi-Agent Architecture
+## System Architecture
 
 PriceLens uses **LangGraph** for product resolution and three independent
-specialist reports. All three agents fan out after input resolution.
+specialist reports. All three agents fan out after input resolution, write
+separate report fields, and join before synthesis. Agent 3 does not depend on
+Agent 2 offers.
 
 ```mermaid
 graph TD
@@ -22,45 +40,139 @@ graph TD
     Node0 --> Agent2[2. Market Investigator<br/>SerpAPI/Apify + PostgreSQL]
     Node0 --> Agent3[3. Policy & Purchase Protection Analyst<br/>PostgreSQL + pgvector policy RAG]
     
-    Agent1 --> Node4[4. Decision Synthesizer<br/>future implementation]
+    Agent1 --> Node4[4. Decision Synthesizer<br/>LLM or deterministic fallback]
     Agent2 --> Node4
     Agent3 --> Node4
     
-    Node4 --> UI[5. Streamlit Dashboard]
+    Node4 --> Node5[5. Deterministic Verifier<br/>Validation and recovery]
+    Node5 --> UI[Streamlit Dashboard<br/>Verdict, reports, and traces]
 ```
 
-### 1. History & Trend Analyst (Deterministic + ReAct)
-* **Role:** Analyzes 365-day price histories to determine the True All-Time Low (ATL) and Deal Health Index ($S_{history}$).
-* **Tools:** Executes pure Python/PostgreSQL tools (`check_price_trend`, `get_historical_sale_drops`) to guarantee 0% hallucination on financial math.
+### 0. Input Resolver
 
-### 2. Market & Offer Investigator
-* **Role:** Finds and normalizes current India-market offers, variants, sellers,
-  availability, and product-bound promotions across the supported retailers.
-  It deterministically validates every offer before ranking verified prices.
+`input_resolver_node` in `orchestrator.py` accepts product names, ten-character
+ASINs, and Amazon URLs containing `/dp/<ASIN>`. Text queries use PostgreSQL
+trigram similarity to find candidates, followed by relevance and requested-variant
+checks. Ambiguous matches produce a resolution error instead of selecting an
+arbitrary variant for history analysis. The resolver also infers the product
+category and sets the retailer scope.
 
-### 3. Policy & Purchase Protection Analyst
-* **Role:** Compares retailer-level return, replacement, cancellation, warranty,
-  and FAQ evidence without reading or ranking Agent 2 offers.
-* **Tools:** Uses hybrid PostgreSQL full-text/pgvector retrieval over approved
-  official India retailer policy documents, followed by citation verification.
+### 1. History and Trend Analyst
 
-### 4. Decision Synthesizer (future)
-* **Role:** Will reconcile the three specialist reports. Its graph node currently
-  returns `pending_future_implementation`; Agent 3 never emits BUY/WAIT itself.
+`tools/analytics.py` calculates historical statistics in Python and SQL. The
+history node exposes `check_price_trend` and `get_historical_sale_drops` as tools
+and can use a ReAct model to explain their results.
 
----
+- Reads current price, observed all-time low and high, overall average, and an
+  average over the latest 30 observations.
+- Calculates the share of stored observations more expensive than today's price.
+- Produces a history score and a historical buying stance:
 
-## 🛠️ Tech Stack
+  ```text
+  S_history = clamp(100 × (1 - (current_price - ATL) / (ATH - ATL)), 0, 100)
+  Flat price range: S_history = 50
+  Historical stance: BUY_NOW if S_history >= 75; otherwise WAIT
+  ```
+
+- Uses stored product aggregates when dated history is absent, explicitly marking
+  `evidence_mode: stored_aggregates`. Aggregate imports do not invent dated rows.
+- Uses sale-drop analysis to provide a possible target price for a WAIT stance.
+
+ATL and ATH describe the available stored evidence. The implementation does not
+require a complete 365-day series; `total_history_days` counts observations, and
+the recent average is not necessarily a continuous 30-calendar-day average.
+
+### 2. Market and Offer Investigator
+
+`MarketInvestigatorAgent` in `tools/market_agent.py` resolves the product family,
+loads or refreshes observations, normalizes provider responses, validates offers,
+and groups results by variant before ranking them.
+
+- Supports `api_first`, `database_first`, and `database_only` provider policies.
+- Uses SerpAPI for discovery and configured Apify actors for listing and
+  promotion enrichment; stored observations can fill gaps in live coverage.
+- Distinguishes listed and verified offers, unconditional prices, and conditional
+  promotions that depend on bank, card, or EMI eligibility.
+- Reports variant groups, best offers, freshness, provider runs, warnings,
+  confidence, and the executed tool trace.
+
+Optional model planning and summaries operate around deterministic matching,
+validation, and ranking. Available evidence determines the report's completeness.
+
+### 3. Policy and Purchase Protection Analyst
+
+`PolicyProtectionAgent` in `tools/eligibility_agent.py` builds retailer-level
+profiles for return, replacement, refund, cancellation, and warranty evidence.
+
+1. Plan policy searches using product category and retailer scope.
+2. Retrieve approved saved documents from the active `policy_local` corpus using
+   PostgreSQL full-text search and pgvector similarity.
+3. Merge keyword and semantic rankings through reciprocal rank fusion,
+   contributing `1 / (60 + rank)` for each retrieval source.
+4. Resolve active chunks, validate usable evidence, and build cited profiles.
+5. Verify the report and expose missing evidence, warnings, and a summary.
+
+Semantic retrieval failure falls back to keyword results with a warning. No
+active corpus produces insufficient evidence. The agent does not download live
+policy pages, consume Agent 2 offers, certify individual sellers, or issue its
+own BUY/WAIT verdict.
+
+### 4. Decision Synthesizer
+
+`tools/decision_synthesizer.py` normalizes the three reports into synthesis inputs.
+It prefers `best_conditional_offer` when present, otherwise
+`best_unconditional_offer`. A configured model produces a single JSON draft;
+missing credentials, model errors, or parsing errors select deterministic fallback.
+
+The output decision vocabulary is `BUY_NOW`, `WAIT`, and `REFUSE_NO_HISTORY`.
+The current deterministic rules are:
+
+1. If an upcoming-sales entry has `days_away <= 14`, return WAIT.
+2. Otherwise, if historical stance is BUY_NOW and an offer exists, return BUY_NOW.
+3. Otherwise, return WAIT with an available historical target.
+
+The model prompt also includes policy-safety and promotion override rules that
+are not fully mirrored by the fallback. Policy gaps affect fallback confidence,
+but do not impose a deterministic WAIT override. Confidence is a heuristic,
+not a calibrated probability.
+
+### 5. Deterministic Verifier and Recovery
+
+`tools/verifier_gate.py` checks the draft before it becomes `final_verdict`:
+
+- **BUY_NOW:** Compare the target with the lowest ranked price for the matching
+  retailer, including variant-group offers, allowing INR 100 difference.
+  A retailer absent from ranked offers receives `PARTIAL` status rather than
+  rejection.
+- **WAIT:** When corresponding history values exist, require a supplied target
+  to be below the overall average and no lower than 85% of the observed ATL.
+  A missing target is allowed.
+- **Web evidence:** Check that `WEB_SEARCH_URL` references start with HTTP or
+  HTTPS. This is a syntax check, not full source-membership verification.
+
+If an LLM draft fails, the graph creates a deterministic replacement and verifies
+it again. An unrecovered rejection clears recommendation values and returns
+`REJECTED`. Successful results include verification status, a timing rationale,
+and a BUY_NOW deal score weighted by history (50%), market confidence (30%),
+and a policy-gap heuristic (20%).
+
+The old minimum-history constants remain in the files, but a minimum-history
+threshold is no longer enforced by the synthesizer or verifier.
+
+
+## Tech Stack
 * **Orchestration:** LangGraph, LangChain
 * **LLM Engine:** Optional OpenAI-compatible guarded tool planning and summaries;
   deterministic execution and fallbacks
 * **Database:** Neon PostgreSQL (`psycopg2`), with local PostgreSQL for tests
 * **Vector Store:** Neon PostgreSQL with pgvector
 * **UI/Frontend:** Streamlit, Plotly Express
+* **Live data:** SerpAPI and Apify provider adapters
+* **Testing:** pytest, with RAG evaluation assets using DeepEval
 
 ---
 
-## 🚀 Getting Started (Local Setup)
+## Getting Started
 
 ### 1. Clone & Environment Setup
 Clone the repository and activate your Python virtual environment:
@@ -83,38 +195,11 @@ docker compose up -d postgres
 cp .env.example .env
 ```
 
-Use the pooled Neon URI at runtime and the direct URI for migrations, policy
-ingestion, and embedding builds:
-
-```env
-DATABASE_URL=postgresql://user:password@ep-example-pooler.region.aws.neon.tech/neondb?sslmode=require
-DATABASE_DIRECT_URL=postgresql://user:password@ep-example.region.aws.neon.tech/neondb?sslmode=require
-TEST_DATABASE_URL=postgresql://pricelens:pricelens_local@localhost:5433/pricelens
-
-# One server-side key is shared by all three agents.
-OPENAI_API_KEY=your_openai_project_key
-OPENAI_BASE_URL=https://api.openai.com/v1
-OPENAI_MODEL=gpt-5-mini
-
-POLICY_EMBEDDINGS=openai
-POLICY_EMBEDDING_MODEL=text-embedding-3-small
-POLICY_EMBEDDING_DIMENSIONS=1536
-
-MARKET_AGENT_LLM_ENABLED=true
-MARKET_AGENT_LLM_BASE_URL=https://api.openai.com/v1
-MARKET_AGENT_LLM_MODEL=gpt-5-mini
-
-ELIGIBILITY_AGENT_LLM_ENABLED=true
-ELIGIBILITY_AGENT_LLM_BASE_URL=https://api.openai.com/v1
-ELIGIBILITY_AGENT_LLM_MODEL=gpt-5-mini
-```
-
-Keep provider/LLM keys only in `.env`, which is ignored by Git. For a new local
-database, initialize the base schema and apply the additive migrations. For an
-existing Neon PriceLens database, run only the migration command after reviewing
-the unapplied SQL files:
-
 ```bash
+# New database only: create the base tables and reference data.
+python scripts/db/init_db.py
+
+# New or existing database: apply unapplied migrations.
 python scripts/db/migrate.py
 ```
 
@@ -123,13 +208,22 @@ Launch the interactive Streamlit UI:
 ```bash
 streamlit run app.py
 ```
-The dashboard has one unified product input and three report tabs:
+The dashboard has one unified product input and an optional live-market checkbox,
+which defaults to off. Submitting the form runs all three agents, synthesis, and
+verification. Results are retained in Streamlit session state.
 
-- **History & Timing** uses the existing historical analyst and price-history tables.
-- **Market Investigator** loads stored market offers or explicitly fetches live
-  SerpAPI/Apify results. Merely opening the tab does not consume provider credits.
-- **Policy Protection** runs Agent 3 independently and shows retailer policy
-  profiles, evidence gaps, citations, and its tool/LLM trace.
+- **Final Synthesized Verdict:** decision, confidence, target price, retailer,
+  and rationale.
+- **Agent 1 report:** historical metrics and price chart where dated data exists.
+- **Agent 2 report:** offer comparisons, variants, promotions, and market evidence.
+- **Agent 3 policy report:** retailer profiles, evidence gaps, citations, and trace.
+- **Execution flow:** stage progress and tool-level traces.
+
+With live-market fetching disabled, the graph uses `database_only` for market
+providers. Optional model calls and query embeddings may still use external
+services; this setting does not make the entire application offline. Bank, card,
+EMI, and deadline preferences exist in internal request contracts but are not all
+exposed by the unified form.
 
 ### 5. Run the Market Investigator data pipeline
 
@@ -192,9 +286,52 @@ means an explicit missing-corpus result, not a fallback to web-ingested evidence
 
 ---
 
-## 🧠 Key Features for Evaluators
-* **Trace observability:** Agent 2 and Agent 3 expose their executed tool stages.
-* **Grounded evidence:** Agent 2 verifies offer prices and product-bound
-  promotions; Agent 3 verifies retailer-policy claims against active chunks.
-* **Safe degradation:** Missing policy evidence lowers confidence and produces a
-  partial report instead of inventing a return, warranty, or authorization claim.
+## Reliability and Security
+
+Market and policy nodes return structured errors so that available specialist
+evidence can still reach synthesis. Provider outages can fall back to stored
+observations; model failures can fall back to deterministic behavior. Missing
+policy evidence is exposed as a gap rather than an invented protection claim.
+
+Credentials are configured server-side through environment variables. Product
+queries and evidence may be sent to configured providers and model services.
+The prototype does not implement production authentication, tenant isolation,
+or rate limiting. Production hardening should also redact detailed exceptions,
+escape untrusted HTML-rendered content, and define data-retention rules.
+
+## Testing and Current Validation Status
+
+Tests under `tests/` cover matching, provider normalization, promotions, market
+validation, policy chunking and retrieval, database migrations, orchestration,
+UI behavior, synthesis, and verification. Live and database-dependent tests need
+their respective configuration; a focused recommendation check is:
+
+```bash
+python -m pytest tests/test_decision_synthesizer.py tests/test_verifier_gate.py -q
+```
+
+On 28 September 2026, this focused run returned **17 passed and 4 failed**.
+The four failures expect refusal or rejection for missing or insufficient price
+history, while the current implementation has removed that restriction. Code,
+tests, and the intended missing-history contract therefore need reconciliation.
+This was not a full-suite, live-provider, or deployment acceptance run.
+
+## Known Limitations and Next Steps
+
+- Saved policy snapshots can become outdated, and retailer coverage can be
+  incomplete. Policy profiles are retailer-level, not offer-specific eligibility.
+- Model and fallback synthesis rules differ. They should share one explicit
+  decision policy and matching tests.
+- Verification is limited: an unmatched retailer can receive a partial pass,
+  URL checks establish syntax only, and exact variant, seller, and evidence
+  membership are not comprehensively checked at the final gate.
+- The unified verdict panel does not prominently display `verification_status`,
+  even though the final report contains it.
+- Seeded sale-calendar dates are reference assumptions, not proof of confirmed
+  upcoming events. Historical aggregates do not establish continuous coverage.
+- Historical evidence retains the legacy `DUCKDB_RECORD` label although the
+  implementation uses PostgreSQL.
+
+Priority improvements are aligned decision rules and tests, stronger final
+grounding checks, clearer partial-status presentation, policy refresh governance,
+and production access controls.
