@@ -12,6 +12,72 @@ def get_db_connection():
         raise ValueError("DATABASE_URL is missing in environment.")
     return psycopg2.connect(DATABASE_URL, connect_timeout=10)
 
+def _resolve_canonical_id(conn, canonical_id: str) -> str:
+    """Resolve a title-hash canonical ID to a real ASIN if one exists in price_history.
+
+    When Agent 2's ProductResolver has no ASIN it stores offers under a
+    ``title:<sha1>`` key.  Historical price data is always stored under the
+    real Amazon ASIN.  If we receive a title-hash ID that has zero rows in
+    ``price_history``, we look up its stored title and find the closest
+    ASIN-keyed product that *does* have history.
+
+    Returns the original ``canonical_id`` unchanged when:
+    - It is already an ASIN-style key (does not start with ``title:``).
+    - No confident match is found (similarity < 0.30).
+    """
+    import re
+    # LLMs sometimes strip the 'title:' prefix because they think it's just a label.
+    if len(canonical_id) == 12 and re.match(r"^[0-9a-f]+$", canonical_id.lower()):
+        canonical_id = "title:" + canonical_id.lower()
+
+    if not canonical_id.startswith("title:"):
+        return canonical_id
+    try:
+        with conn.cursor() as cur:
+            cur.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
+            cur.execute(
+                "SELECT COUNT(*) FROM price_history WHERE canonical_id = %s",
+                (canonical_id,),
+            )
+            if cur.fetchone()[0] > 0:
+                return canonical_id  # already has data, nothing to do
+
+            cur.execute(
+                "SELECT title FROM products WHERE canonical_id = %s",
+                (canonical_id,),
+            )
+            row = cur.fetchone()
+            if not row or not row[0]:
+                return canonical_id
+            stored_title = row[0]
+
+            cur.execute(
+                """
+                SELECT p.canonical_id,
+                       GREATEST(
+                           word_similarity(%s, p.title),
+                           similarity(%s, p.title)
+                       ) AS score
+                FROM products p
+                WHERE p.canonical_id NOT LIKE 'title:%%'
+                  AND EXISTS (
+                      SELECT 1 FROM price_history ph
+                      WHERE ph.canonical_id = p.canonical_id
+                  )
+                ORDER BY score DESC
+                LIMIT 5
+                """,
+                (stored_title, stored_title),
+            )
+            candidates = cur.fetchall()
+            if candidates and float(candidates[0][1]) >= 0.30:
+                return candidates[0][0]
+    except Exception as e:
+        conn.rollback()
+        pass  # fall back silently
+    return canonical_id
+
+
 def query_historical_trend(canonical_id: str) -> dict:
     """
     TOOL 1: The Baseline Engine
@@ -21,6 +87,7 @@ def query_historical_trend(canonical_id: str) -> dict:
     try:
         conn = get_db_connection()
         with conn.cursor() as cur:
+            canonical_id = _resolve_canonical_id(conn, canonical_id)
             # 1. Get current price
             cur.execute(
                 """
@@ -133,6 +200,7 @@ def query_sale_event_drops(canonical_id: str) -> dict:
     try:
         conn = get_db_connection()
         with conn.cursor() as cur:
+            canonical_id = _resolve_canonical_id(conn, canonical_id)
             # 1. Get baseline prices
             cur.execute(
                 """

@@ -1,0 +1,146 @@
+[
+    {
+        "test_case_id": "TC_001_CLEAR_BUY",
+        "description": "Product is at All-Time Low, great bank offer, safe return policy. Synthesizer should recommend BUY_NOW.",
+        "input_state": {
+            "query": "iPhone 15 Pro 128GB",
+            "history_report": {
+                "trend": {
+                    "s_history": 100,
+                    "historical_stance": "BUY_NOW",
+                    "true_atl": 115000,
+                    "current_price": 110000,
+                    "total_history_days": 180
+                },
+                "drops": {}
+            },
+            "market_report": {
+                "status": "success",
+                "best_unconditional_offer": {
+                    "price": 115000,
+                    "seller_name": "Appario",
+                    "retailer": "Amazon"
+                },
+                "best_conditional_offer": {
+                    "price": 115000,
+                    "effective_price": 110000,
+                    "promotion_count": 1,
+                    "condition": "NEW",
+                    "seller_name": "Appario Retail",
+                    "retailer": "Amazon"
+                },
+                "confidence": 0.9
+            },
+            "policy_report": {
+                "evidence_gap_count": 0,
+                "summary": "7-day replacement, 1 Year Brand Warranty"
+            }
+        },
+        "expected_decision": "BUY_NOW"
+    },
+    {
+        "test_case_id": "TC_002_WAIT_HIGH_PRICE",
+        "description": "Product is significantly above historical average. Synthesizer should recommend WAIT.",
+        "input_state": {
+            "query": "Sony WH-1000XM5",
+            "history_report": {
+                "trend": {
+                    "s_history": 20,
+                    "historical_stance": "WAIT",
+                    "true_atl": 22000,
+                    "current_price": 28000,
+                    "total_history_days": 90
+                },
+                "drops": {
+                    "safe_target_price": 24000
+                }
+            },
+            "market_report": {
+                "status": "success",
+                "best_unconditional_offer": {
+                    "price": 28000,
+                    "retailer": "Croma"
+                },
+                "confidence": 0.95
+            },
+            "policy_report": {
+                "evidence_gap_count": 0,
+                "summary": "15-day return"
+            }
+        },
+        "expected_decision": "WAIT"
+    },
+    {
+        "test_case_id": "TC_003_CONFLICT_RESOLVED",
+        "description": "History says WAIT because base price is high, but Market finds a massive bank promo making it ATL. Synthesizer should override to BUY_NOW.",
+        "input_state": {
+            "query": "Samsung Galaxy S23",
+            "history_report": {
+                "trend": {
+                    "s_history": 40,
+                    "historical_stance": "WAIT",
+                    "true_atl": 55000,
+                    "current_price": 60000,
+                    "total_history_days": 120
+                },
+                "drops": {
+                    "safe_target_price": 52000
+                }
+            },
+            "market_report": {
+                "status": "success",
+                "best_unconditional_offer": {
+                    "price": 60000,
+                    "retailer": "Flipkart"
+                },
+                "best_conditional_offer": {
+                    "price": 60000,
+                    "effective_price": 50000,
+                    "promotion_count": 2,
+                    "condition": "NEW",
+                    "seller_name": "RetailNet",
+                    "retailer": "Flipkart"
+                },
+                "confidence": 0.8
+            },
+            "policy_report": {
+                "evidence_gap_count": 0,
+                "summary": "7-day replacement"
+            }
+        },
+        "expected_decision": "BUY_NOW"
+    },
+    {
+        "test_case_id": "TC_004_POOR_POLICY",
+        "description": "Price is great, but seller is shady / refurbished with NO return policy. Synthesizer should warn the user.",
+        "input_state": {
+            "query": "Dyson V12",
+            "history_report": {
+                "trend": {
+                    "s_history": 90,
+                    "historical_stance": "BUY_NOW",
+                    "true_atl": 40000,
+                    "current_price": 41000,
+                    "total_history_days": 200
+                },
+                "drops": {}
+            },
+            "market_report": {
+                "status": "success",
+                "best_conditional_offer": {
+                    "price": 41000,
+                    "effective_price": 41000,
+                    "condition": "USED",
+                    "seller_name": "UnknownSeller123",
+                    "retailer": "Flipkart"
+                },
+                "confidence": 0.4
+            },
+            "policy_report": {
+                "evidence_gap_count": 1,
+                "summary": "No Returns, Seller Warranty 3 Months"
+            }
+        },
+        "expected_decision": "WAIT"
+    }
+]

@@ -17,6 +17,7 @@ SummaryWriter = Callable[[dict[str, Any]], str]
 
 
 class MarketInvestigatorAgent:
+    
     """Live-aware Agent 2 with database fallback and grounded output."""
 
     def __init__(
@@ -28,6 +29,7 @@ class MarketInvestigatorAgent:
         summary_writer: SummaryWriter | None = None,
         enable_llm_summary: bool = False,
         trace_callback: Any = None,
+        web_search_tool: Any = None,
     ):
         self.database = database
         self.providers = list(providers or [])
@@ -36,6 +38,7 @@ class MarketInvestigatorAgent:
         self.summary_writer = summary_writer
         self.enable_llm_summary = enable_llm_summary
         self.trace_callback = trace_callback
+        self.web_search_tool = web_search_tool
 
     def analyze(self, request: MarketAgentRequest, *, limit: int = 20) -> dict[str, Any]:
         started_at = perf_counter()
@@ -288,6 +291,7 @@ class MarketInvestigatorAgent:
             duration_ms=(perf_counter() - verification_started) * 1000,
         ))
         report["agent_trace"] = trace
+        self._add_price_intelligence(report, request)
         self._add_llm_summary(report)
         return report
 
@@ -743,9 +747,62 @@ class MarketInvestigatorAgent:
         return (
             "Explain the verified Indian-market price comparison. Prioritize an explicitly "
             "requested variant, then summarize other verified variants. Use only supplied "
-            "prices, sellers, promotions, freshness, and coverage. Do not invent facts, "
-            "assess seller safety, or make BUY NOW / WAIT decisions."
+            "prices, sellers, promotions, freshness, and coverage. "
+            "If price_intelligence is present, mention any relevant signals concisely — "
+            "such as a successor model launch, an upcoming sale event, or an official "
+            "price cut — that a buyer should know before purchasing. "
+            "Do not invent facts, assess seller safety, or make BUY NOW / WAIT decisions."
         )
+
+    def _add_price_intelligence(
+        self, report: dict[str, Any], request: MarketAgentRequest
+    ) -> None:
+        """Call the web-search tool for price-drop signals and attach results.
+
+        The result is stored under ``report["price_intelligence"]``.  When the
+        tool is not configured the key is set to ``None`` and the trace event
+        is marked as *skipped*.  Any API failure is caught here so the rest of
+        the report is never affected.
+        """
+        if self.web_search_tool is None:
+            report["price_intelligence"] = None
+            report["agent_trace"].append(self._trace_event(
+                stage="search_price_signals",
+                tool="price_signal_web_search",
+                source="web_search",
+                input_summary=f"Price-drop intelligence for: {request.query}",
+                output_summary=(
+                    "web_search_tool not configured; attach a PriceSignalWebSearchTool "
+                    "instance to enable price-drop intelligence"
+                ),
+                duration_ms=0,
+                status="skipped",
+            ))
+            return
+
+        result = self.web_search_tool.search(
+            request.query, deadline_days=request.deadline_days
+        )
+        report["price_intelligence"] = result.to_dict()
+
+        if result.error:
+            report["warnings"].append(
+                f"Price-signal web search failed: {result.error}"
+            )
+
+        report["agent_trace"].append(self._trace_event(
+            stage="search_price_signals",
+            tool="price_signal_web_search",
+            source="web_search",
+            input_summary=f"Price-drop intelligence query for: {request.query}",
+            output_summary=(
+                f"Intelligence fetched — {len(result.steps)} web search steps completed"
+                if not result.error
+                else f"Web search failed: {result.error}"
+            ),
+            duration_ms=result.duration_ms,
+            status="error" if result.error else "completed",
+        ))
 
     def _plan_market_tools(
         self, request: MarketAgentRequest, trace: list[dict[str, Any]]
@@ -795,12 +852,31 @@ class MarketInvestigatorAgent:
                 "search_current_market_if_stale",
                 "validate_offer_snapshot",
             ]
+            _tool_descriptions = {
+                "search_current_market": (
+                    "Fetch live offers from SerpAPI and Apify right now. "
+                    "Required when provider_policy is api_first. "
+                    "Forbidden when provider_policy is database_only."
+                ),
+                "load_stored_market_data": (
+                    "Load the most recent offers already stored in PostgreSQL. "
+                    "Always required as the primary or fallback data source."
+                ),
+                "search_current_market_if_stale": (
+                    "Fetch live offers only when stored data is stale or incomplete. "
+                    "Use only when provider_policy is database_first."
+                ),
+                "validate_offer_snapshot": (
+                    "Validate, deduplicate, and rank all collected offers. "
+                    "Always required as the final step before building the report."
+                ),
+            }
             schemas = [
                 {
                     "type": "function",
                     "function": {
                         "name": name,
-                        "description": f"Request the guarded Agent 2 stage: {name}.",
+                        "description": _tool_descriptions[name],
                         "parameters": {
                             "type": "object",
                             "properties": {},
@@ -816,28 +892,27 @@ class MarketInvestigatorAgent:
                 model=model,
                 timeout=20,
                 max_retries=1,
-            ).bind_tools(schemas)
+            ).bind_tools(schemas, tool_choice="required")
             response = llm.invoke(
                 display_prompt
                 + f"\nProvider policy: {request.provider_policy}"
                 + f"\nProduct request: {request.query}"
+                + "\n\nSelect and call every tool that should run for this investigation."
             )
             proposed = [
                 str(call.get("name"))
                 for call in (getattr(response, "tool_calls", []) or [])
                 if call.get("name") in tool_names
             ]
-            allowed = set(defaults)
-            guarded = [name for name in proposed if name in allowed]
-            planned = list(dict.fromkeys([*guarded, *defaults]))
+            planned = proposed
             trace.append(self._trace_event(
                 stage="plan_market_investigation",
                 tool="plan_market_tools",
                 source="llm",
                 input_summary=f"Provider policy {request.provider_policy}",
                 output_summary=(
-                    f"LLM proposed {len(proposed)} tool calls; guarded plan: "
-                    + ", ".join(planned)
+                    f"LLM proposed {len(proposed)} tool calls: "
+                    + (", ".join(planned) if planned else "none")
                 ),
                 duration_ms=(perf_counter() - started_at) * 1000,
                 display_prompt=display_prompt,
@@ -931,6 +1006,11 @@ class MarketInvestigatorAgent:
             }
             for group in report.get("variant_groups") or []
         ]
+        # Include price-drop intelligence if the web search tool ran successfully.
+        price_intel = report.get("price_intelligence") or {}
+        if price_intel.get("answer") and not price_intel.get("error"):
+            facts["price_intelligence"] = price_intel["answer"]
+
         prompt = (
             "You are PriceLens Agent 2 for India. "
             + MarketInvestigatorAgent._summary_display_prompt()

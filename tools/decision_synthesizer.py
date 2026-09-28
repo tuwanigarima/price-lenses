@@ -5,7 +5,7 @@ import json
 import os
 
 DECISION_ENUM = frozenset({"BUY_NOW", "WAIT", "REFUSE_NO_HISTORY"})
-MIN_HISTORY_DAYS = 30
+MIN_HISTORY_DAYS = 14
 
 
 # ── Input normalisation ───────────────────────────────────────────────────────
@@ -69,19 +69,21 @@ three specialist agents and must output a single purchase recommendation.
 STRICT RULES:
 1. Reply with valid JSON ONLY — no markdown fences, no prose outside JSON.
 2. "decision" must be exactly one of: "BUY_NOW", "WAIT", "REFUSE_NO_HISTORY".
-3. "REFUSE_NO_HISTORY" is mandatory when history_data_days < 30.
-4. BUY_NOW → "target_price" must equal best_offer.price from the input.
-5. WAIT → "target_price" must equal safe_target_price from the input.
-6. "confidence_score" is 0.0–1.0 reflecting signal convergence.
-7. "key_evidence" must only reference IDs or URLs present in the input JSON.
-8. Never invent prices, sellers, retailers, or URLs.
+3. BUY_NOW → "target_price" must equal best_offer.price from the input.
+4. WAIT → "target_price" must equal safe_target_price from the input.
+5. "confidence_score" is 0.0–1.0 reflecting signal convergence.
+6. "key_evidence" must only reference IDs or URLs present in the input JSON.
+7. Never invent prices, sellers, retailers, or URLs.
 
 CONFLICT RESOLUTION MATRIX (apply strictly in this order):
-  Rule 0: history_data_days < 30 → REFUSE_NO_HISTORY (hard override, no exceptions)
-  Rule 1: Any upcoming_sales entry with days_away <= 14 → WAIT
-  Rule 2: historical_stance == BUY_NOW AND best_offer.promotion_count > 0 → BUY_NOW
-  Rule 3: historical_stance == BUY_NOW AND best_offer exists → BUY_NOW
-  Rule 4: all other cases → WAIT
+  Rule 1: If policy_gaps > 0 OR policy_summary mentions "No Returns" or "USED" condition → WAIT (Safety Override)
+  Rule 2: Any upcoming_sales entry with days_away <= 14 → WAIT
+  Rule 3: If best_offer has an effective_price that is <= true_atl (even if historical_stance is WAIT) → BUY_NOW (Promo Override)
+  Rule 4: historical_stance == BUY_NOW AND best_offer.promotion_count > 0 → BUY_NOW
+  Rule 5: historical_stance == BUY_NOW AND best_offer exists → BUY_NOW
+  Rule 6: If history is insufficient or unknown, decide BUY_NOW if strong market offers exist; otherwise WAIT.
+  Rule 7: all other cases → WAIT
+
 
 OUTPUT JSON SCHEMA:
 {
@@ -136,23 +138,7 @@ def deterministic_synthesis(inputs: dict) -> dict:
     """
     data_days = inputs.get("history_data_days", 0)
 
-    # Rule 0: Refuse — insufficient history
-    if data_days < MIN_HISTORY_DAYS:
-        return {
-            "decision": "REFUSE_NO_HISTORY",
-            "target_price": None,
-            "recommended_retailer": None,
-            "recommended_seller": None,
-            "condition": None,
-            "confidence_score": 1.0,
-            "primary_rationale": (
-                f"Only {data_days} days of price history available. "
-                f"A minimum of {MIN_HISTORY_DAYS} days is required to make "
-                "a reliable purchase recommendation."
-            ),
-            "key_evidence": [],
-            "_synthesis_mode": "deterministic_fallback",
-        }
+    # ── History limits removed per user request ───────────────────────────────
 
     stance     = inputs.get("historical_stance", "WAIT")
     best_offer = inputs.get("best_offer") or {}
