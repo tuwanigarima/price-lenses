@@ -1,0 +1,144 @@
+[
+  {
+    "query": "Oppo Reno14 5G",
+    "mode": "database_only",
+    "runner": "streamlit.testing.v1.AppTest",
+    "ui_exceptions": [],
+    "ui_errors": [],
+    "ui_warnings": [
+      "### \ud83d\udfe1 WAIT",
+      "Based on saved document snapshots; live policy changes have not been checked.",
+      "Some retailer policy types have no active official evidence."
+    ],
+    "has_result": true,
+    "canonical_id": "B0FCTS8CVJ",
+    "resolved_title": "Oppo Reno14 5G (Pearl White, 8GB RAM, 256GB Storage) with No Cost EMI/Additional Exchange Offers",
+    "product_category": "electronics",
+    "history": {
+      "canonical_id": "B0FCTS8CVJ",
+      "current_price": 39499.0,
+      "true_atl": 35999.0,
+      "true_ath": 42999.0,
+      "avg_30d": 39460.3,
+      "overall_avg": 40083.16,
+      "total_history_days": 250,
+      "price_percentile": 61.6,
+      "s_history": 50.0,
+      "historical_stance": "WAIT"
+    },
+    "market": {
+      "status": "insufficient_evidence",
+      "match_mode": "product_family_not_found",
+      "validation_summary": {
+        "verified": 0,
+        "partial": 0,
+        "stale": 0,
+        "rejected": 0
+      },
+      "best_unconditional_offer": null,
+      "best_conditional_offer": null,
+      "lowest_starting_price": null,
+      "warnings": [],
+      "coverage": {
+        "expected_retailers": [
+          "amazon.in",
+          "flipkart.com",
+          "croma.com",
+          "reliancedigital.in",
+          "vijaysales.com"
+        ],
+        "verified_retailers": [],
+        "missing_retailers": [
+          "amazon.in",
+          "flipkart.com",
+          "croma.com",
+          "reliancedigital.in",
+          "vijaysales.com"
+        ]
+      },
+      "signals": [
+        "INSUFFICIENT_EVIDENCE"
+      ]
+    },
+    "policy": {
+      "status": "partial",
+      "source_mode": "local_documents",
+      "corpus_build_id": "79f0db2b-7910-4a50-88e3-017af9549abd",
+      "evidence_chunk_count": 5,
+      "evidence_gap_count": 22,
+      "warnings": [
+        "Based on saved document snapshots; live policy changes have not been checked.",
+        "Some retailer policy types have no active official evidence."
+      ],
+      "summary": "Amazon India \u2014 RETURN, REPLACEMENT and REFUND are evidenced (policy references to item-specific return/replacement windows and misuse/suspension rules); CANCELLATION and WARRANTY are missing (no active evidence) \u2014 source: https://www.amazon.in/gp/help/customer/display.html?nodeId=202111910.  \nFlipkart \u2014 no policies evidenced: RETURN, REPLACEMENT, REFUND, CANCELLATION and WARRANTY are all missing.  \nCroma \u2014 no policies evidenced: RETURN, REPLACEMENT, REFUND, CANCELLATION and WARRANTY are all missing.  \nReliance Digital \u2014 no policies evidenced: RETURN, REPLACEMENT, REFUND, CANCELLATION and WARRANTY are all missing.  \nVijay Sales \u2014 no policies evidenced: RETURN, REPLACEMENT, REFUND, CANCELLATION and WARRANTY are all missing.  \n\nGaps explained: where RETURN/REPLACEMENT/REFUND evidence is missing there is no sourced information on eligible return windows, replacement processes or refund timing/methods; where CANCELLATION is missing there is no sourced rule on order cancellation rights or procedures; where WARRANTY is missing there is no sourced manufacturer/retailer warranty scope or duration\u2014users must confirm listing-specific terms (risk: official policy evidence is incomplete)."
+    },
+    "verdict": {
+      "decision": "WAIT",
+      "target_price": 36439.0,
+      "recommended_retailer": "Amazon & Flipkart",
+      "recommended_seller": null,
+      "condition": "NEW",
+      "confidence_score": 0.78,
+      "primary_rationale": "Safety override: documented policy gaps (22) and incomplete return/warranty evidence increase buyer risk, and a major festive sale (Big Billion Days & Great Indian Festival) begins in 8 days with typical category discounts (~18%). Price history and trackers indicate a likely sale-driven dip toward the supplied safe target of \u20b936,439. Given insufficient verified retailer offers and policy uncertainty, wait for the upcoming sale or for complete policy verification before purchasing.",
+      "key_evidence": [
+        {
+          "source_type": "DUCKDB_RECORD",
+          "reference_id_or_url": "B0FCTS8CVJ",
+          "fact_summary": "Canonical product id present; historical_stance = WAIT; current_price = 39499.0; true_atl = 35999.0; safe_target_price = 36439.0.",
+          "verified": true
+        },
+        {
+          "source_type": "DUCKDB_RECORD",
+          "reference_id_or_url": "Big Billion Days & Great Indian Festival",
+          "fact_summary": "Upcoming sale entry: retailers = Amazon & Flipkart; typical_category_discount_pct = 0.18; days_away = 8 (approx_start_date 2026-10-06).",
+          "verified": true
+        },
+        {
+          "source_type": "WEB_SEARCH_URL",
+          "reference_id_or_url": "https://www.amazon.in/gp/help/customer/display.html?nodeId=202111910",
+          "fact_summary": "Policy summary shows partial evidence across retailers; multiple missing return/replacement/warranty/cancellation policies (policy_gaps = 22) increasing buyer risk.",
+          "verified": true
+        }
+      ],
+      "_synthesis_mode": "llm",
+      "schema_version": "1.0",
+      "verification_status": "VERIFIED",
+      "effective_deal_score": null,
+      "timing_and_safety_rationale": "Price health score: 50/100. Next sale: Big Billion Days & Great Indian Festival in ~8 days. WAIT for price near \u20b936,439. Amazon India \u2014 RETURN, REPLACEMENT and REFUND are evidenced (policy references to item-specific return/replacement windows and misuse/suspension rules); CANCELLATION and WARRANTY are missing (no active evidence) \u2014 source: https://www.amazon.in/gp/help/customer/display.html?nodeId=202111910.  \nFlipkart \u2014 no policies evidenced: RETURN, REPLACEMENT, REFUND, CANCELLATION and WARRANTY are all missing.  \nCroma \u2014 no policies evidenced: RETURN, REPLACEMENT, REFUND, CANCELLATION and WARRANTY are all missing.  \nReliance Digital \u2014 no policies evidenced: RETURN, REPLACEMENT, REFUND, CANCELLATION and WARRANTY are all missing.  \nVijay Sales \u2014 no policies evidenced: RETURN, REPLACEMENT, REFUND, CANCELLATION and WARRANTY are all missing.  \n\nGaps explained: where RETURN/REPLACEMENT/REFUND evidence is missing there is no sourced information on eligible return windows, replacement processes or refund timing/methods; where CANCELLATION is missing there is no sourced rule on order cancellation rights or procedures; where WARRANTY is missing there is no sourced manufacturer/retailer warranty scope or duration\u2014users must confirm listing-specific terms (risk: official policy evidence is incomplete)."
+    },
+    "stages": [
+      {
+        "stage": "input_resolver",
+        "status": "completed",
+        "output": "Graph stage completed"
+      },
+      {
+        "stage": "history_agent",
+        "status": "completed",
+        "output": "Report returned"
+      },
+      {
+        "stage": "policy_agent",
+        "status": "completed",
+        "output": "Report returned"
+      },
+      {
+        "stage": "market_agent",
+        "status": "completed",
+        "output": "Report returned"
+      },
+      {
+        "stage": "decision_synthesizer",
+        "status": "completed",
+        "output": "Graph stage completed"
+      },
+      {
+        "stage": "verifier_gate",
+        "status": "completed",
+        "output": "Graph stage completed"
+      }
+    ],
+    "errors": [],
+    "duration_seconds": 185.79
+  }
+]

@@ -16,9 +16,9 @@ SUPPORTED_POLICY_RETAILERS: tuple[str, ...] = (
 SUPPORTED_POLICY_TYPES: tuple[str, ...] = (
     "RETURN",
     "REPLACEMENT",
+    "REFUND",
     "CANCELLATION",
     "WARRANTY",
-    "FAQ",
 )
 
 
@@ -57,6 +57,12 @@ class PolicyHit:
     condition_scope: str | None = None
     relevance: float = 0.0
     retrieval_sources: tuple[str, ...] = ()
+    policy_types: tuple[str, ...] = ()
+    evidence_text: str | None = None
+    parent_context: str | None = None
+    captured_at: str | None = None
+    corpus_build_id: str | None = None
+    local_path: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -74,6 +80,8 @@ class PolicyProtectionReport:
     analysis_timestamp: str = ""
     product_category: str = "electronics"
     country_code: str = "IN"
+    corpus_build_id: str | None = None
+    source_mode: str = "stored_policy_corpus"
     retailers_evaluated: list[str] = field(default_factory=list)
     policy_profiles: list[dict[str, Any]] = field(default_factory=list)
     evidence_chunk_count: int = 0

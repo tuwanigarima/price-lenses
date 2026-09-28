@@ -66,7 +66,11 @@ class PolicyProtectionAgent:
             country_code=request.country_code,
             retailers_evaluated=list(request.retailers),
             agent_trace=trace,
+            corpus_build_id=getattr(self.database, "build_id", None),
+            source_mode="local_documents" if hasattr(self.database, "build_id") else "stored_policy_corpus",
         )
+        if report.source_mode == "local_documents":
+            report.warnings.append("Based on saved document snapshots; live policy changes have not been checked.")
         try:
             hits: list[dict[str, Any]] = []
             policy_plan = self._plan_policy_searches(request, trace)
@@ -74,9 +78,17 @@ class PolicyProtectionAgent:
                 retailer = planned_search["retailer"]
                 question = planned_search["question"]
                 started = perf_counter()
-                retailer_hits = self._retrieve_retailer_policies(
-                    request, retailer, question
-                )
+                try:
+                    retailer_hits = self._retrieve_retailer_policies(request, retailer, question)
+                except Exception as exc:
+                    report.warnings.append(f"RETRIEVAL_ERROR: {retailer} ({type(exc).__name__}); other retailer results retained.")
+                    self._append_trace(trace, {
+                        **self._trace("retrieve_retailer_policy_evidence", "search_retailer_policies", started,
+                                      f"Policy retrieval failed for {retailer}", input_summary=question),
+                        "status": "error",
+                    })
+                    continue
+                report.warnings.extend(getattr(self.retriever, "warnings", []))
                 hits.extend(retailer_hits)
                 self._append_trace(trace, self._trace(
                         "retrieve_retailer_policy_evidence",
@@ -178,6 +190,7 @@ class PolicyProtectionAgent:
                 ),
             )
             report.agent_trace = trace
+            report.warnings = list(dict.fromkeys(report.warnings))
             self.database.finish_analysis(
                 analysis_id, status=report.status, warnings=report.warnings
             )
@@ -218,8 +231,7 @@ class PolicyProtectionAgent:
             {
                 "retailer": retailer,
                 "question": (
-                    f"{request.product_category} return replacement cancellation "
-                    "warranty purchase protection and FAQ rules"
+                    f"{request.product_category} {' '.join(request.policy_types).lower()} purchase protection rules"
                 ),
             }
             for retailer in request.retailers
@@ -230,13 +242,14 @@ class PolicyProtectionAgent:
             "a concise question covering the requested policy types. Do not answer "
             "policy questions from memory."
         )
-        if not self.enable_llm_summary or not self.llm_settings:
+        if (not self.enable_llm_summary or not self.llm_settings
+                or (hasattr(self.database, "build_id") and self.database.build_id is None)):
             self._append_trace(trace, {
                     **self._trace(
                         "plan_policy_investigation",
                         "search_retailer_policies",
                         started,
-                        "LLM planning disabled; deterministic retailer search plan used",
+                        "LLM planning disabled or local corpus unavailable; deterministic retailer search plan used",
                         input_summary=f"{len(request.retailers)} supported retailers",
                     ),
                     "source": "deterministic fallback",
@@ -354,11 +367,14 @@ class PolicyProtectionAgent:
                         "heading_path": hit.get("heading_path"),
                         "relevance": hit.get("relevance"),
                         "retrieval_sources": list(hit.get("retrieval_sources") or []),
+                        "captured_at": hit.get("captured_at"),
+                        "corpus_build_id": hit.get("corpus_build_id"),
+                        "local_path": hit.get("local_path"),
                     }
                     for hit in matches[:3]
                 ]
                 if matches:
-                    content = " ".join(str(matches[0].get("content") or "").split())
+                    content = " ".join(str(matches[0].get("evidence_text") or matches[0].get("content") or "").split())
                     policies.append(
                         {
                             "policy_type": policy_type,
@@ -370,6 +386,12 @@ class PolicyProtectionAgent:
                                 else 0.65
                             ),
                             "citations": citations,
+                            "evidence_passages": [
+                                {"chunk_id": str(hit["chunk_id"]),
+                                 "excerpt": hit.get("evidence_text") or hit.get("content"),
+                                 "section_context": hit.get("parent_context")}
+                                for hit in matches[:3]
+                            ],
                         }
                     )
                 else:
@@ -416,6 +438,9 @@ class PolicyProtectionAgent:
 
     def _summary(self, payload: dict[str, Any]) -> tuple[str, str, str, str]:
         deterministic = self._deterministic_summary(payload)
+        if payload.get("source_mode") == "local_documents" and not payload.get("evidence_chunk_count"):
+            return (deterministic, "skipped", "deterministic fallback",
+                    "No local policy evidence; returned evidence gaps without a model call.")
         if self.summary_writer:
             try:
                 return (
@@ -497,7 +522,7 @@ class PolicyProtectionAgent:
             "analyst. Summarize only the supplied citation-grounded policy profiles in "
             "at most 200 words. Include one concise sentence for every supplied retailer "
             "and explicitly distinguish evidenced policy types from missing types. Explain "
-            "return, replacement, cancellation, warranty and FAQ gaps. Do not discuss "
+            "return, replacement, refund, cancellation and warranty gaps. Do not discuss "
             "prices, rank offers, invent rules, or issue BUY_NOW/WAIT."
         )
 

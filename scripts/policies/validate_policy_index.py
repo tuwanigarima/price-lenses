@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools.eligibility_config import EligibilitySettings  # noqa: E402
-from tools.eligibility_db import EligibilityDatabase  # noqa: E402
+from tools.local_policy_db import LocalPolicyDatabase as EligibilityDatabase  # noqa: E402
 from tools.policy_retrieval import HybridPolicyRetriever  # noqa: E402
 
 

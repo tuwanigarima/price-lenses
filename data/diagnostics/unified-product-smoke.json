@@ -1,0 +1,401 @@
+[
+  {
+    "query": "iPhone 14 256 GB Blue",
+    "mode": "database_only",
+    "runner": "streamlit.testing.v1.AppTest",
+    "ui_exceptions": [],
+    "ui_errors": [],
+    "ui_warnings": [
+      "Agent 1 found no usable historical evidence.",
+      "Based on saved document snapshots; live policy changes have not been checked.",
+      "LOCAL_CORPUS_NOT_READY: no published local collection; legacy web-ingested evidence is excluded.",
+      "No active official policy evidence was retrieved."
+    ],
+    "has_result": true,
+    "canonical_id": null,
+    "resolved_title": "iPhone 14 256 GB Blue",
+    "product_category": "smartphone",
+    "history": {},
+    "market": {
+      "status": "insufficient_evidence",
+      "match_mode": "product_family_not_found",
+      "validation_summary": {
+        "verified": 0,
+        "partial": 0,
+        "stale": 0,
+        "rejected": 0
+      },
+      "best_unconditional_offer": null,
+      "best_conditional_offer": null,
+      "lowest_starting_price": null,
+      "warnings": [],
+      "coverage": {
+        "expected_retailers": [
+          "amazon.in",
+          "flipkart.com",
+          "croma.com",
+          "reliancedigital.in",
+          "vijaysales.com"
+        ],
+        "verified_retailers": [],
+        "missing_retailers": [
+          "amazon.in",
+          "flipkart.com",
+          "croma.com",
+          "reliancedigital.in",
+          "vijaysales.com"
+        ]
+      },
+      "signals": [
+        "INSUFFICIENT_EVIDENCE"
+      ]
+    },
+    "policy": {
+      "status": "insufficient_evidence",
+      "source_mode": "local_documents",
+      "corpus_build_id": null,
+      "evidence_chunk_count": 0,
+      "evidence_gap_count": 25,
+      "warnings": [
+        "Based on saved document snapshots; live policy changes have not been checked.",
+        "LOCAL_CORPUS_NOT_READY: no published local collection; legacy web-ingested evidence is excluded.",
+        "No active official policy evidence was retrieved."
+      ],
+      "summary": "Agent 3 reviewed active policy evidence for 5 Indian retailers and found 25 missing retailer-policy combinations. Amazon India: evidenced none; missing RETURN, REPLACEMENT, REFUND, CANCELLATION, WARRANTY. Flipkart: evidenced none; missing RETURN, REPLACEMENT, REFUND, CANCELLATION, WARRANTY. Croma: evidenced none; missing RETURN, REPLACEMENT, REFUND, CANCELLATION, WARRANTY. Reliance Digital: evidenced none; missing RETURN, REPLACEMENT, REFUND, CANCELLATION, WARRANTY. Vijay Sales: evidenced none; missing RETURN, REPLACEMENT, REFUND, CANCELLATION, WARRANTY. These are retailer-level protections; listing-specific terms must still be confirmed before purchase."
+    },
+    "verdict": {
+      "decision": "REFUSE_NO_HISTORY",
+      "target_price": null,
+      "recommended_retailer": null,
+      "recommended_seller": null,
+      "condition": null,
+      "confidence_score": 1.0,
+      "primary_rationale": "History coverage is insufficient (history_data_days = 0, ranked_offer_count = 0, market_confidence = 0.0 and market_signals = INSUFFICIENT_EVIDENCE). Per Rule 0 of the conflict-resolution matrix, when history_data_days < 30 the agent must refuse to make a buy/wait recommendation. Although an upcoming major sale is listed (9 days away), the lack of any verifiable price/offers and missing retailer policy evidence prevents a safe recommendation.",
+      "key_evidence": [
+        {
+          "source_type": "DUCKDB_RECORD",
+          "reference_id_or_url": "sale_id:1",
+          "fact_summary": "Upcoming sale 'Big Billion Days & Great Indian Festival' (Amazon & Flipkart) approx_start_date ~2026-10-06, days_away: 9.",
+          "verified": true
+        }
+      ],
+      "_synthesis_mode": "llm",
+      "schema_version": "1.0",
+      "verification_status": "VERIFIED",
+      "effective_deal_score": null,
+      "timing_and_safety_rationale": "Next sale: Big Billion Days & Great Indian Festival in ~9 days. Insufficient price history — cannot make a reliable recommendation. Please try again once more data is available. Agent 3 reviewed active policy evidence for 5 Indian retailers and found 25 missing retailer-policy combinations. Amazon India: evidenced none; missing RETURN, REPLACEMENT, REFUND, CANCELLATION, WARRANTY. Flipkart: evidenced none; missing RETURN, REPLACEMENT, REFUND, CANCELLATION, WARRANTY. Croma: evidenced none; missing RETURN, REPLACEMENT, REFUND, CANCELLATION, WARRANTY. Reliance Digital: evidenced none; missing RETURN, REPLACEMENT, REFUND, CANCELLATION, WARRANTY. Vijay Sales: evidenced none; missing RETURN, REPLACEMENT, REFUND, CANCELLATION, WARRANTY. These are retailer-level protections; listing-specific terms must still be confirmed before purchase."
+    },
+    "stages": [
+      {
+        "stage": "input_resolver",
+        "status": "completed",
+        "output": "Graph stage completed"
+      },
+      {
+        "stage": "history_agent",
+        "status": "completed",
+        "output": "Report returned"
+      },
+      {
+        "stage": "policy_agent",
+        "status": "completed",
+        "output": "Report returned"
+      },
+      {
+        "stage": "market_agent",
+        "status": "completed",
+        "output": "Report returned"
+      },
+      {
+        "stage": "decision_synthesizer",
+        "status": "completed",
+        "output": "Graph stage completed"
+      },
+      {
+        "stage": "verifier_gate",
+        "status": "completed",
+        "output": "Graph stage completed"
+      }
+    ],
+    "errors": [
+      "No matching product and requested variant were verified in the history database."
+    ],
+    "duration_seconds": 53.71
+  },
+  {
+    "query": "Noise Pulse 2 Max",
+    "mode": "database_only",
+    "runner": "streamlit.testing.v1.AppTest",
+    "ui_exceptions": [],
+    "ui_errors": [],
+    "ui_warnings": [
+      "### 🟡 WAIT",
+      "Based on saved document snapshots; live policy changes have not been checked.",
+      "LOCAL_CORPUS_NOT_READY: no published local collection; legacy web-ingested evidence is excluded.",
+      "No active official policy evidence was retrieved."
+    ],
+    "has_result": true,
+    "canonical_id": "B0B6BLTGTT",
+    "resolved_title": "Noise Pulse 2 Max 1.85\" Display, Bluetooth Calling Smart Watch, 10 Days Battery, 550 NITS Brightness, Smart DND, 100 Sports Modes, Smartwatch for Men and Women (Jet Black)",
+    "product_category": "smartwatch",
+    "history": {
+      "canonical_id": "B0B6BLTGTT",
+      "current_price": 1499.0,
+      "true_atl": 899.0,
+      "true_ath": 1499.0,
+      "avg_30d": 1475.67,
+      "overall_avg": 1281.22,
+      "total_history_days": 325,
+      "price_percentile": 0.0,
+      "s_history": 0.0,
+      "historical_stance": "WAIT"
+    },
+    "market": {
+      "status": "insufficient_evidence",
+      "match_mode": "product_family_not_found",
+      "validation_summary": {
+        "verified": 0,
+        "partial": 0,
+        "stale": 0,
+        "rejected": 0
+      },
+      "best_unconditional_offer": null,
+      "best_conditional_offer": null,
+      "lowest_starting_price": null,
+      "warnings": [],
+      "coverage": {
+        "expected_retailers": [
+          "amazon.in",
+          "flipkart.com",
+          "croma.com",
+          "reliancedigital.in",
+          "vijaysales.com"
+        ],
+        "verified_retailers": [],
+        "missing_retailers": [
+          "amazon.in",
+          "flipkart.com",
+          "croma.com",
+          "reliancedigital.in",
+          "vijaysales.com"
+        ]
+      },
+      "signals": [
+        "INSUFFICIENT_EVIDENCE"
+      ]
+    },
+    "policy": {
+      "status": "insufficient_evidence",
+      "source_mode": "local_documents",
+      "corpus_build_id": null,
+      "evidence_chunk_count": 0,
+      "evidence_gap_count": 25,
+      "warnings": [
+        "Based on saved document snapshots; live policy changes have not been checked.",
+        "LOCAL_CORPUS_NOT_READY: no published local collection; legacy web-ingested evidence is excluded.",
+        "No active official policy evidence was retrieved."
+      ],
+      "summary": "Agent 3 reviewed active policy evidence for 5 Indian retailers and found 25 missing retailer-policy combinations. Amazon India: evidenced none; missing RETURN, REPLACEMENT, REFUND, CANCELLATION, WARRANTY. Flipkart: evidenced none; missing RETURN, REPLACEMENT, REFUND, CANCELLATION, WARRANTY. Croma: evidenced none; missing RETURN, REPLACEMENT, REFUND, CANCELLATION, WARRANTY. Reliance Digital: evidenced none; missing RETURN, REPLACEMENT, REFUND, CANCELLATION, WARRANTY. Vijay Sales: evidenced none; missing RETURN, REPLACEMENT, REFUND, CANCELLATION, WARRANTY. These are retailer-level protections; listing-specific terms must still be confirmed before purchase."
+    },
+    "verdict": {
+      "decision": "WAIT",
+      "target_price": 899.0,
+      "recommended_retailer": null,
+      "recommended_seller": null,
+      "condition": null,
+      "confidence_score": 0.65,
+      "primary_rationale": "An upcoming major sale (Big Billion Days & Great Indian Festival) is 9 days away (<=14 days) and historically yields the safe target of ₹899 (~40% off). Historical analysis (history_data_days=325) also recommends waiting for this predictable festive discount. Given the imminent sale and consistent past reductions, defer purchase until the sale target of ₹899 is available.",
+      "key_evidence": [
+        {
+          "source_type": "DUCKDB_RECORD",
+          "reference_id_or_url": "B0B6BLTGTT",
+          "fact_summary": "Canonical product id present; history_data_days=325; history_analysis recommends waiting and lists safe_target_price=899.0.",
+          "verified": true
+        },
+        {
+          "source_type": "DUCKDB_RECORD",
+          "reference_id_or_url": "Big Billion Days & Great Indian Festival",
+          "fact_summary": "Upcoming sale entry: sale_id=1, days_away=9 (<=14), retailer='Amazon & Flipkart', typical_category_discount_pct=0.18.",
+          "verified": true
+        }
+      ],
+      "_synthesis_mode": "llm",
+      "schema_version": "1.0",
+      "verification_status": "VERIFIED",
+      "effective_deal_score": null,
+      "timing_and_safety_rationale": "Price health score: 0/100. Next sale: Big Billion Days & Great Indian Festival in ~9 days. WAIT for price near ₹899. Agent 3 reviewed active policy evidence for 5 Indian retailers and found 25 missing retailer-policy combinations. Amazon India: evidenced none; missing RETURN, REPLACEMENT, REFUND, CANCELLATION, WARRANTY. Flipkart: evidenced none; missing RETURN, REPLACEMENT, REFUND, CANCELLATION, WARRANTY. Croma: evidenced none; missing RETURN, REPLACEMENT, REFUND, CANCELLATION, WARRANTY. Reliance Digital: evidenced none; missing RETURN, REPLACEMENT, REFUND, CANCELLATION, WARRANTY. Vijay Sales: evidenced none; missing RETURN, REPLACEMENT, REFUND, CANCELLATION, WARRANTY. These are retailer-level protections; listing-specific terms must still be confirmed before purchase."
+    },
+    "stages": [
+      {
+        "stage": "input_resolver",
+        "status": "completed",
+        "output": "Graph stage completed"
+      },
+      {
+        "stage": "policy_agent",
+        "status": "completed",
+        "output": "Report returned"
+      },
+      {
+        "stage": "market_agent",
+        "status": "completed",
+        "output": "Report returned"
+      },
+      {
+        "stage": "history_agent",
+        "status": "completed",
+        "output": "Report returned"
+      },
+      {
+        "stage": "decision_synthesizer",
+        "status": "completed",
+        "output": "Graph stage completed"
+      },
+      {
+        "stage": "verifier_gate",
+        "status": "completed",
+        "output": "Graph stage completed"
+      }
+    ],
+    "errors": [],
+    "duration_seconds": 66.65
+  },
+  {
+    "query": "Oppo Reno14 5G",
+    "mode": "database_only",
+    "runner": "streamlit.testing.v1.AppTest",
+    "ui_exceptions": [],
+    "ui_errors": [],
+    "ui_warnings": [
+      "### 🟡 WAIT",
+      "Based on saved document snapshots; live policy changes have not been checked.",
+      "LOCAL_CORPUS_NOT_READY: no published local collection; legacy web-ingested evidence is excluded.",
+      "No active official policy evidence was retrieved."
+    ],
+    "has_result": true,
+    "canonical_id": "B0FCTS8CVJ",
+    "resolved_title": "Oppo Reno14 5G (Pearl White, 8GB RAM, 256GB Storage) with No Cost EMI/Additional Exchange Offers",
+    "product_category": "electronics",
+    "history": {
+      "canonical_id": "B0FCTS8CVJ",
+      "current_price": 39499.0,
+      "true_atl": 35999.0,
+      "true_ath": 42999.0,
+      "avg_30d": 39460.3,
+      "overall_avg": 40083.16,
+      "total_history_days": 250,
+      "price_percentile": 61.6,
+      "s_history": 50.0,
+      "historical_stance": "WAIT"
+    },
+    "market": {
+      "status": "insufficient_evidence",
+      "match_mode": "product_family_not_found",
+      "validation_summary": {
+        "verified": 0,
+        "partial": 0,
+        "stale": 0,
+        "rejected": 0
+      },
+      "best_unconditional_offer": null,
+      "best_conditional_offer": null,
+      "lowest_starting_price": null,
+      "warnings": [],
+      "coverage": {
+        "expected_retailers": [
+          "amazon.in",
+          "flipkart.com",
+          "croma.com",
+          "reliancedigital.in",
+          "vijaysales.com"
+        ],
+        "verified_retailers": [],
+        "missing_retailers": [
+          "amazon.in",
+          "flipkart.com",
+          "croma.com",
+          "reliancedigital.in",
+          "vijaysales.com"
+        ]
+      },
+      "signals": [
+        "INSUFFICIENT_EVIDENCE"
+      ]
+    },
+    "policy": {
+      "status": "insufficient_evidence",
+      "source_mode": "local_documents",
+      "corpus_build_id": null,
+      "evidence_chunk_count": 0,
+      "evidence_gap_count": 25,
+      "warnings": [
+        "Based on saved document snapshots; live policy changes have not been checked.",
+        "LOCAL_CORPUS_NOT_READY: no published local collection; legacy web-ingested evidence is excluded.",
+        "No active official policy evidence was retrieved."
+      ],
+      "summary": "Agent 3 reviewed active policy evidence for 5 Indian retailers and found 25 missing retailer-policy combinations. Amazon India: evidenced none; missing RETURN, REPLACEMENT, REFUND, CANCELLATION, WARRANTY. Flipkart: evidenced none; missing RETURN, REPLACEMENT, REFUND, CANCELLATION, WARRANTY. Croma: evidenced none; missing RETURN, REPLACEMENT, REFUND, CANCELLATION, WARRANTY. Reliance Digital: evidenced none; missing RETURN, REPLACEMENT, REFUND, CANCELLATION, WARRANTY. Vijay Sales: evidenced none; missing RETURN, REPLACEMENT, REFUND, CANCELLATION, WARRANTY. These are retailer-level protections; listing-specific terms must still be confirmed before purchase."
+    },
+    "verdict": {
+      "decision": "WAIT",
+      "target_price": 36439.0,
+      "recommended_retailer": "Amazon & Flipkart",
+      "recommended_seller": null,
+      "condition": "NEW",
+      "confidence_score": 0.7,
+      "primary_rationale": "A major festive sale (Big Billion Days & Great Indian Festival, sale_id 1) begins in ~9 days and typically yields ~18% category discounts. Historical analysis for canonical_id B0FCTS8CVJ recommends waiting with a safe target of ₹36,439 (historical_stance = WAIT, history_data_days = 250). Given the imminent sale window and aligned historical stance, waiting is recommended despite low market coverage and policy gaps; monitor offers during the sale and buy if price reaches the safe target.",
+      "key_evidence": [
+        {
+          "source_type": "DUCKDB_RECORD",
+          "reference_id_or_url": "Big Billion Days & Great Indian Festival",
+          "fact_summary": "upcoming_sales entry (sale_id = 1) starts in ~9 days (days_away = 9); typical_category_discount_pct = 0.18; retailer = 'Amazon & Flipkart'.",
+          "verified": true
+        },
+        {
+          "source_type": "DUCKDB_RECORD",
+          "reference_id_or_url": "B0FCTS8CVJ",
+          "fact_summary": "canonical_id B0FCTS8CVJ: historical_stance = 'WAIT'; safe_target_price = 36439.0; current_price = 39499.0; history_data_days = 250.",
+          "verified": true
+        }
+      ],
+      "_synthesis_mode": "llm",
+      "schema_version": "1.0",
+      "verification_status": "VERIFIED",
+      "effective_deal_score": null,
+      "timing_and_safety_rationale": "Price health score: 50/100. Next sale: Big Billion Days & Great Indian Festival in ~9 days. WAIT for price near ₹36,439. Agent 3 reviewed active policy evidence for 5 Indian retailers and found 25 missing retailer-policy combinations. Amazon India: evidenced none; missing RETURN, REPLACEMENT, REFUND, CANCELLATION, WARRANTY. Flipkart: evidenced none; missing RETURN, REPLACEMENT, REFUND, CANCELLATION, WARRANTY. Croma: evidenced none; missing RETURN, REPLACEMENT, REFUND, CANCELLATION, WARRANTY. Reliance Digital: evidenced none; missing RETURN, REPLACEMENT, REFUND, CANCELLATION, WARRANTY. Vijay Sales: evidenced none; missing RETURN, REPLACEMENT, REFUND, CANCELLATION, WARRANTY. These are retailer-level protections; listing-specific terms must still be confirmed before purchase."
+    },
+    "stages": [
+      {
+        "stage": "input_resolver",
+        "status": "completed",
+        "output": "Graph stage completed"
+      },
+      {
+        "stage": "policy_agent",
+        "status": "completed",
+        "output": "Report returned"
+      },
+      {
+        "stage": "market_agent",
+        "status": "completed",
+        "output": "Report returned"
+      },
+      {
+        "stage": "history_agent",
+        "status": "completed",
+        "output": "Report returned"
+      },
+      {
+        "stage": "decision_synthesizer",
+        "status": "completed",
+        "output": "Graph stage completed"
+      },
+      {
+        "stage": "verifier_gate",
+        "status": "completed",
+        "output": "Graph stage completed"
+      }
+    ],
+    "errors": [],
+    "duration_seconds": 72.26
+  }
+]

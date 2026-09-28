@@ -625,7 +625,7 @@ def render_unified_tab() -> None:
             st.markdown(f"**Recommended Retailer:** {retailer}")
             st.markdown(f"**Rationale:** {final.get('primary_rationale', '')}")
             
-        if draft and draft.get("decision") != final.get("decision"):
+        if draft and any(draft.get(key) != final.get(key) for key in draft):
             st.warning("⚠️ The deterministic verifier gate modified the LLM's draft verdict to enforce grounding rules.")
         st.markdown("---")
     else:

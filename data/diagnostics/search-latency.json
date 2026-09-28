@@ -1,0 +1,201 @@
+{
+  "captured_at": "2026-09-28T14:51:57.893807+00:00",
+  "query": "Oppo Reno14 5G",
+  "mode": "database_only",
+  "runner": "existing LangGraph; no UI rendering",
+  "total_seconds": 194.009,
+  "nodes": [
+    {
+      "node": "input_resolver",
+      "start_seconds": 0.007,
+      "duration_seconds": 3.34
+    },
+    {
+      "node": "history_agent",
+      "start_seconds": 3.351,
+      "duration_seconds": 38.16
+    },
+    {
+      "node": "policy_agent",
+      "start_seconds": 3.36,
+      "duration_seconds": 47.479
+    },
+    {
+      "node": "market_agent",
+      "start_seconds": 3.359,
+      "duration_seconds": 171.71
+    },
+    {
+      "node": "decision_synthesizer",
+      "start_seconds": 175.07,
+      "duration_seconds": 18.935
+    },
+    {
+      "node": "verifier_gate",
+      "start_seconds": 194.006,
+      "duration_seconds": 0.002
+    }
+  ],
+  "reports": {
+    "history_report": {
+      "status": null,
+      "stages": [
+        {
+          "stage": "call_check_price_trend",
+          "tool": "check_price_trend",
+          "source": "database",
+          "status": "completed",
+          "duration_ms": 0
+        },
+        {
+          "stage": "call_get_historical_sale_drops",
+          "tool": "get_historical_sale_drops",
+          "source": "database",
+          "status": "completed",
+          "duration_ms": 0
+        },
+        {
+          "stage": "generate_financial_analysis",
+          "tool": "react_agent",
+          "source": "llm",
+          "status": "completed",
+          "duration_ms": 0
+        }
+      ]
+    },
+    "market_report": {
+      "status": "insufficient_evidence",
+      "stages": [
+        {
+          "stage": "understand_request",
+          "tool": "parse_product_request",
+          "source": "deterministic",
+          "status": "completed",
+          "duration_ms": 0.1
+        },
+        {
+          "stage": "plan_market_investigation",
+          "tool": "plan_market_tools",
+          "source": "llm",
+          "status": "completed",
+          "duration_ms": 13889.3
+        },
+        {
+          "stage": "load_market_data",
+          "tool": "get_market_snapshot",
+          "source": "database",
+          "status": "completed",
+          "duration_ms": 1850.7
+        },
+        {
+          "stage": "validate_and_group_variants",
+          "tool": "group_product_variants",
+          "source": "deterministic",
+          "status": "completed",
+          "duration_ms": 822.6
+        },
+        {
+          "stage": "validate_commercial_offers",
+          "tool": "validate_offer_snapshot",
+          "source": "deterministic",
+          "status": "completed",
+          "duration_ms": 0.0
+        },
+        {
+          "stage": "verify_market_report",
+          "tool": "verify_market_report",
+          "source": "deterministic",
+          "status": "completed",
+          "duration_ms": 0.0
+        },
+        {
+          "stage": "search_price_signals",
+          "tool": "price_signal_web_search",
+          "source": "web_search",
+          "status": "completed",
+          "duration_ms": 141002.9
+        },
+        {
+          "stage": "prepare_user_summary",
+          "tool": "generate_market_summary",
+          "source": "llm",
+          "status": "completed",
+          "duration_ms": 10993.5
+        }
+      ]
+    },
+    "policy_report": {
+      "status": "partial",
+      "stages": [
+        {
+          "stage": "plan_policy_investigation",
+          "tool": "search_retailer_policies",
+          "source": "llm",
+          "status": "completed",
+          "duration_ms": 14545.62
+        },
+        {
+          "stage": "retrieve_retailer_policy_evidence",
+          "tool": "search_retailer_policies",
+          "source": "PostgreSQL FTS + pgvector",
+          "status": "completed",
+          "duration_ms": 5143.89
+        },
+        {
+          "stage": "retrieve_retailer_policy_evidence",
+          "tool": "search_retailer_policies",
+          "source": "PostgreSQL FTS + pgvector",
+          "status": "completed",
+          "duration_ms": 2366.16
+        },
+        {
+          "stage": "retrieve_retailer_policy_evidence",
+          "tool": "search_retailer_policies",
+          "source": "PostgreSQL FTS + pgvector",
+          "status": "completed",
+          "duration_ms": 2075.05
+        },
+        {
+          "stage": "retrieve_retailer_policy_evidence",
+          "tool": "search_retailer_policies",
+          "source": "PostgreSQL FTS + pgvector",
+          "status": "completed",
+          "duration_ms": 2082.5
+        },
+        {
+          "stage": "retrieve_retailer_policy_evidence",
+          "tool": "search_retailer_policies",
+          "source": "PostgreSQL FTS + pgvector",
+          "status": "completed",
+          "duration_ms": 2214.49
+        },
+        {
+          "stage": "build_policy_profiles",
+          "tool": "classify_policy_coverage",
+          "source": "deterministic",
+          "status": "completed",
+          "duration_ms": 0.68
+        },
+        {
+          "stage": "generate_policy_summary",
+          "tool": "summarize_policy_profiles",
+          "source": "LLM",
+          "status": "completed",
+          "duration_ms": 10360.68
+        },
+        {
+          "stage": "verify_policy_grounding",
+          "tool": "verify_policy_report",
+          "source": "deterministic",
+          "status": "completed",
+          "duration_ms": 0.59
+        }
+      ]
+    }
+  },
+  "verdict": {
+    "decision": "WAIT",
+    "_synthesis_mode": "llm",
+    "verification_status": "VERIFIED"
+  }
+}

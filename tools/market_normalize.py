@@ -116,6 +116,8 @@ _STOPWORDS = {"the", "and", "with", "for", "new", "latest", "smartphone", "phone
 
 def normalize_title(title: str) -> str:
     t = title.lower()
+    t = re.sub(r"\b(reno)\s+(\d+)\b", r"\1\2", t)
+    t = re.sub(r"\b(iphone|ipad)\s*(\d+)\b", r"\1 \2", t)
     t = re.sub(r"(\d+)\s*(gb|tb)\b", r"\1\2", t)   # "256 GB" == "256GB"
     t = re.sub(r"[^a-z0-9 ]+", " ", t)
     return " ".join(w for w in t.split() if w not in _STOPWORDS)

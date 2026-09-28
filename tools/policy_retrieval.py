@@ -142,6 +142,7 @@ class HybridPolicyRetriever:
         self.database = database
         self.settings = settings
         self.embedder = embedder
+        self.warnings: list[str] = []
 
     def search(
         self,
@@ -152,6 +153,9 @@ class HybridPolicyRetriever:
         product_category: str | None = "electronics",
         limit: int = 8,
     ) -> list[PolicyHit]:
+        self.warnings = list(getattr(self.database, "retrieval_warnings", []))
+        if hasattr(self.database, "build_id") and self.database.build_id is None:
+            return []
         candidate_limit = max(limit * 2, 12)
         lexical = self.database.keyword_policy_search(
             policy_keyword_query(tuple(policy_types or ())),
@@ -176,9 +180,10 @@ class HybridPolicyRetriever:
                 dimensions=embedder.dimensions,
             )
             semantic_ids = [str(row["chunk_id"]) for row in semantic]
-        except Exception:
+        except Exception as exc:
             # Keyword retrieval keeps Agent 3 usable during API or vector outages.
             semantic_ids = []
+            self.warnings.append(f"SEMANTIC_RETRIEVAL_UNAVAILABLE: keyword results only ({type(exc).__name__}).")
 
         scores: dict[str, float] = {}
         sources: dict[str, set[str]] = {}
@@ -203,7 +208,7 @@ class HybridPolicyRetriever:
                 continue
             if retailers and row.get("retailer") not in retailers:
                 continue
-            if policy_types and row.get("policy_type") not in policy_types:
+            if policy_types and not set(policy_types).intersection(row.get("policy_types") or [row.get("policy_type")]):
                 continue
             hits.append(
                 PolicyHit(
@@ -219,6 +224,12 @@ class HybridPolicyRetriever:
                     condition_scope=row.get("condition_scope"),
                     relevance=round(scores[chunk_id], 6),
                     retrieval_sources=tuple(sorted(sources[chunk_id])),
+                    policy_types=tuple(row.get("policy_types") or ()),
+                    evidence_text=row.get("evidence_text"),
+                    parent_context=row.get("parent_context"),
+                    captured_at=(row.get("document_metadata") or {}).get("captured_at"),
+                    corpus_build_id=str(row["build_id"]) if row.get("build_id") else None,
+                    local_path=(row.get("document_metadata") or {}).get("local_path"),
                 )
             )
         return hits

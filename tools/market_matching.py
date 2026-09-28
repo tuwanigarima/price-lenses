@@ -64,7 +64,7 @@ def is_accessory_title(title: str | None) -> bool:
 MAJOR_BRANDS = {
     "apple", "samsung", "google", "oneplus", "xiaomi", "redmi", "poco",
     "oppo", "vivo", "realme", "motorola", "moto", "iqoo", "nothing",
-    "asus", "sony", "hp", "dell", "lenovo", "acer", "lg"
+    "asus", "sony", "hp", "dell", "lenovo", "acer", "lg", "noise", "boat"
 }
 
 # Product-family / series keywords that strongly identify a product line.
@@ -73,6 +73,7 @@ MAJOR_BRANDS = {
 _FAMILY_KEYWORDS = {
     "note", "galaxy", "pixel", "reno", "nord", "edge", "razr",
     "zenfone", "xperia", "voyage", "narzo", "spark", "infinix",
+    "iphone", "ipad", "macbook", "pulse", "colorfit",
 }
 
 # Brand synonyms: product sub-names that uniquely identify a brand even when
@@ -102,6 +103,11 @@ def product_relevance(query: str, title: str | None) -> float:
 
     query_tokens = set(normalized_query.split())
     title_tokens = set(normalized_title.split())
+
+    # Shared numbers cannot substitute for a requested product family.
+    # Preserve the upstream brand, synonym, family-conflict and suffix guards.
+    if not (query_tokens & _FAMILY_KEYWORDS).issubset(title_tokens):
+        return 0.0
 
     # 0a. Strict Brand Boundary: both sides declare a major brand → they must match.
     query_brands = query_tokens & MAJOR_BRANDS

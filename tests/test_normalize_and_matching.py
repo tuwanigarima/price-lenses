@@ -70,3 +70,15 @@ def test_accessory_query_can_still_match_an_accessory():
     assert product_relevance(
         "vivo s2 flip cover", "Myflips Flip Cover For Vivo S2 5G"
     ) >= 0.25
+
+
+def test_phone_identity_is_not_an_android_version_match():
+    assert product_relevance(
+        "iPhone 14 256 GB Blue",
+        "Samsung Galaxy A15 5G Light Blue 128GB Android 14",
+    ) == 0
+
+
+def test_reno_spacing_and_iphone_spacing_are_equivalent():
+    assert product_relevance("Oppo Reno14 5G", "OPPO Reno 14 5G 8GB 256GB") >= 0.25
+    assert product_relevance("iPhone14 256GB Blue", "Apple iPhone 14 256 GB Blue") >= 0.25

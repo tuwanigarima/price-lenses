@@ -152,13 +152,16 @@ with configured Flipkart and bank-offer actors.
 
 ### 6. Build and test Agent 3 locally
 
-Register approved policy sources, fetch immutable versions into Neon, and build
-OpenAI embeddings in pgvector:
+Agent 3 uses only saved files from `data/policies/corpus/`, listed in
+`data/policies/curated_manifest.json`. See that folder's README for required
+metadata. No policy web downloads, search, or Apify fallback are enabled.
+Validate the selected files, then publish embeddings to your configured Neon
+database (the additive `policy_local` schema):
 
 ```bash
-python scripts/policies/seed_sources.py
-python scripts/policies/fetch_documents.py
-python scripts/policies/build_pgvector_index.py
+python scripts/policies/import_local_documents.py
+python scripts/policies/init_local_schema.py
+python scripts/policies/import_local_documents.py --publish
 python scripts/policies/validate_policy_index.py "Can I return a defective phone?" --retailer Flipkart
 ```
 
@@ -181,9 +184,11 @@ snapshots only for rows with a raw ASIN and positive current price. It does not
 turn aggregate ATL/ATH values into invented dated `price_history` rows; Agent 1
 uses those aggregates transparently when no dated series exists.
 
-`policy_sources` records fetch failures instead of activating unusable content.
-`policy_chunks` remains canonical; pgvector rows can always be rebuilt from
-active chunks without copying data from Chroma.
+`policy_local.documents` stores the local snapshots and provenance;
+`policy_local.chunks` stores bounded chunks, source spans, and pgvector embeddings.
+Publication atomically switches the active build after validation. Legacy policy
+tables are retained but excluded from Agent 3 retrieval. No published local build
+means an explicit missing-corpus result, not a fallback to web-ingested evidence.
 
 ---
 

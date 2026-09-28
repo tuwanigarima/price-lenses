@@ -53,6 +53,21 @@ class FakeRetriever:
         ]
 
 
+def test_one_retailer_failure_preserves_other_policy_evidence():
+    class PartlyFailingRetriever(FakeRetriever):
+        def search(self, *args, retailers, **kwargs):
+            if retailers == ["Amazon India"]:
+                raise TimeoutError("fixture timeout")
+            return super().search(*args, retailers=retailers, **kwargs)
+
+    report = PolicyProtectionAgent(FakeDatabase(), PartlyFailingRetriever()).analyze(
+        PolicyAgentRequest(query="phone", retailers=("Amazon India", "Flipkart"), policy_types=("RETURN",))
+    )
+    assert report["status"] == "partial"
+    assert report["evidence_chunk_count"] == 1
+    assert any("RETRIEVAL_ERROR: Amazon India" in warning for warning in report["warnings"])
+
+
 def test_agent3_builds_policy_profiles_without_reading_offers():
     database = FakeDatabase()
     request = PolicyAgentRequest(

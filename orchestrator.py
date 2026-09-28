@@ -37,11 +37,13 @@ def input_resolver_node(state: PriceLensState):
     """Node 0: Parses raw user query to extract ASIN/canonical_id"""
     from tools.analytics import get_db_connection
     from tools.market_matching import product_relevance
+    from tools.market_agent_tools import variant_facets, variant_match_tier
     
     query = state.get("query", "").strip()
     asin = None
     title = query
     errors = []
+    conn = None
     
     # 1. Regex for Amazon URL
     dp_match = re.search(r"/dp/([A-Z0-9]{10})", query)
@@ -84,27 +86,44 @@ def input_resolver_node(state: PriceLensState):
                     """,
                     (query, query),
                 )
-                # Re-rank with product_relevance (brand/family-aware).
-                # Crucial step: Give a strong preference (+0.25 bonus) to actual ASINs
-                # over fallback 'title:' hashes. Add an additional (+0.25 bonus) if
-                # the product actually has historical price data available. This ensures
-                # we pick the variant that will successfully populate the History charts.
+                # Validate identity before preferring records with history. A
+                # history bonus must never select a different requested variant.
+                requested_variant = variant_facets(query)
                 ranked = []
                 for candidate_id, candidate_title, _db_score, has_history in cur.fetchall():
                     score = product_relevance(query, candidate_title)
-                    if score >= 0.10:
-                        sort_score = score
-                        if not candidate_id.startswith('title:'):
-                            sort_score += 0.25
-                        if has_history:
-                            sort_score += 0.25
-                        ranked.append((sort_score, score, candidate_id, candidate_title))
-                
+                    if score < 0.25:
+                        continue
+                    if any(requested_variant.values()) and variant_match_tier(
+                        requested_variant, variant_facets(candidate_title)
+                    ) != "exact_variant":
+                        continue
+                    sort_score = score
+                    if not candidate_id.startswith("title:"):
+                        sort_score += 0.25
+                    if has_history:
+                        sort_score += 0.25
+                    ranked.append((sort_score, score, candidate_id, candidate_title))
+
                 ranked.sort(reverse=True)
                 if ranked:
-                    _sort_score, _score, asin, title = ranked[0]
+                    top = ranked[0]
+                    ambiguous = any(
+                        abs(top[1] - candidate[1]) < 0.05
+                        and variant_facets(top[3]) != variant_facets(candidate[3])
+                        for candidate in ranked[1:]
+                    )
+                    if ambiguous:
+                        errors.append("Product identity is ambiguous; select an exact variant or provide its product ID before using history.")
+                    else:
+                        _sort_score, _score, asin, title = top
+                else:
+                    errors.append("No matching product and requested variant were verified in the history database.")
     except Exception as e:
         errors.append(str(e))
+    finally:
+        if conn is not None:
+            conn.close()
     
     category_text = f"{query} {title}".lower()
     category_rules = (
@@ -407,11 +426,6 @@ def market_agent_node(state: PriceLensState):
 
 def policy_agent_node(state: PriceLensState):
     """Node 3: retrieve retailer policy evidence independently of offers."""
-    from tools.eligibility_agent import PolicyProtectionAgent
-    from tools.eligibility_config import EligibilitySettings
-    from tools.eligibility_db import EligibilityDatabase
-    from tools.eligibility_models import PolicyAgentRequest, SUPPORTED_POLICY_RETAILERS
-    from tools.policy_retrieval import HybridPolicyRetriever
 
     ctx = state.get("st_ctx")
     containers = state.get("st_containers") or {}
@@ -442,6 +456,14 @@ def policy_agent_node(state: PriceLensState):
 
     database = None
     try:
+        # Import failures must produce a report just like retrieval failures,
+        # so the other agents and the graph's synthesis step can finish.
+        from tools.eligibility_agent import PolicyProtectionAgent
+        from tools.eligibility_config import EligibilitySettings
+        from tools.local_policy_db import LocalPolicyDatabase as EligibilityDatabase
+        from tools.eligibility_models import PolicyAgentRequest, SUPPORTED_POLICY_RETAILERS
+        from tools.policy_retrieval import HybridPolicyRetriever
+
         settings = EligibilitySettings.from_env()
         database = EligibilityDatabase(settings.database_url)
         report = PolicyProtectionAgent(
@@ -499,6 +521,18 @@ def verifier_gate_node(state: PriceLensState):
     from tools.verifier_gate import verify_draft_verdict
     draft = state.get("draft_verdict") or {}
     result = verify_draft_verdict(draft, state)
+    if not result.passed and draft.get("_synthesis_mode") == "llm":
+        # Invalid model citations must not discard usable specialist evidence.
+        # Verify the deterministic replacement under exactly the same rules.
+        from tools.decision_synthesizer import deterministic_synthesis, extract_synthesis_inputs
+        inputs = extract_synthesis_inputs(state)
+        inputs["canonical_id"] = state.get("canonical_id")
+        fallback = deterministic_synthesis(inputs)
+        fallback["_synthesis_mode"] = "deterministic_recovery"
+        recovery = verify_draft_verdict(fallback, state)
+        if recovery.passed:
+            recovery.final_verdict["verification_recovery"] = "The model draft failed validation; verified deterministic evidence was used."
+            result = recovery
     errors = list(state.get("errors") or [])
     if not result.passed:
         errors.append(result.reason)
