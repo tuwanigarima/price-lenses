@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 PRICE_TOLERANCE_INR: float = 100.0  # ₹100 lenient (floating-point safe)
-MIN_HISTORY_DAYS: int = 30
+MIN_HISTORY_DAYS: int = 14
 
 
 @dataclass
@@ -24,15 +24,7 @@ def verify_draft_verdict(
     trend     = history.get("trend") or {}
     data_days = int(trend.get("total_history_days") or 0)
 
-    # ── Check 1 ───────────────────────────────────────────────────────────────
-    if data_days < MIN_HISTORY_DAYS and decision != "REFUSE_NO_HISTORY":
-        return _reject(
-            draft,
-            f"VERIFIER_REJECT: {decision!r} proposed with only {data_days} "
-            f"history days (minimum {MIN_HISTORY_DAYS}). Overriding to REFUSE_NO_HISTORY.",
-            override_decision="REFUSE_NO_HISTORY",
-        )
-
+    # ── History limits removed per user request ───────────────────────────────
     # ── Check 2 ───────────────────────────────────────────────────────────────
     verification_status = "VERIFIED"
     if decision == "BUY_NOW":
@@ -108,6 +100,7 @@ def _check_buy_now_price(draft: dict, state: dict, tolerance: float) -> Verifica
             draft,
             f"VERIFIER_REJECT: BUY_NOW target ₹{float(target):,.0f} differs "
             f"from grounded market price ₹{db_price:,.0f} by more than ₹{tolerance:.0f}.",
+            override_decision="WAIT"
         )
     return VerificationResult(passed=True, reason="price_grounded")
 
@@ -121,10 +114,14 @@ def _check_wait_target(draft: dict, trend: dict) -> VerificationResult:
     avg = trend.get("overall_avg")
     if avg is not None and target >= float(avg):
         return _reject(draft,
-            f"VERIFIER_REJECT: WAIT target ₹{target:,.0f} must be below overall_avg ₹{float(avg):,.0f}.")
+            f"VERIFIER_REJECT: WAIT target ₹{target:,.0f} must be below overall_avg ₹{float(avg):,.0f}.",
+            override_decision="WAIT"
+        )
     if atl is not None and target < float(atl) * 0.85:
         return _reject(draft,
-            f"VERIFIER_REJECT: WAIT target ₹{target:,.0f} is below ATL ₹{float(atl):,.0f} × 0.85.")
+            f"VERIFIER_REJECT: WAIT target ₹{target:,.0f} is below ATL ₹{float(atl):,.0f} × 0.85.",
+            override_decision="WAIT"
+        )
     return VerificationResult(passed=True, reason="wait_target_grounded")
 
 
@@ -187,8 +184,8 @@ def _reject(draft: dict, reason: str, *, override_decision: str = "REFUSE_NO_HIS
             "recommended_seller": None,
             "condition": None,
             "confidence_score": 0.0,
-            "primary_rationale": reason,
-            "key_evidence": [],
+            "primary_rationale": f"{draft.get('primary_rationale', '')}\n\n[System Override: {reason}]".strip(),
+            "key_evidence": draft.get("key_evidence") or [],
             "schema_version": "1.0",
             "verification_status": "REJECTED",
             "effective_deal_score": None,

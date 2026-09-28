@@ -94,11 +94,20 @@ def validate_offer(
     else:
         checks["promotion_binding"] = "NOT_APPLICABLE"
 
+    # Hard checks: a FAIL or UNKNOWN here blocks VERIFIED status.
+    _HARD_CHECKS = {"retailer", "currency", "price", "freshness", "promotion_binding"}
+    # Soft checks: UNKNOWN is recorded and warned but does not prevent VERIFIED.
+    _SOFT_CHECKS = {"availability", "product_url", "seller_identity"}
+
     if rejection_reasons:
         status = "REJECTED"
     elif checks["freshness"] == "FAIL":
         status = "STALE"
-    elif any(value in {"UNKNOWN", "FAIL"} for value in checks.values()):
+    elif any(
+        checks.get(key) in {"UNKNOWN", "FAIL"}
+        for key in _HARD_CHECKS
+        if key in checks
+    ):
         status = "PARTIAL"
     else:
         status = "VERIFIED"

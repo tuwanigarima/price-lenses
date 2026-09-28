@@ -1,3 +1,4 @@
+import os
 import re
 from typing import TypedDict, Any
 from langgraph.graph import StateGraph, START, END
@@ -61,26 +62,47 @@ def input_resolver_node(state: PriceLensState):
                 else:
                     errors.append(f"ASIN {asin} not found in database.")
             else:
-                # Text input may match multiple storage/colour variants. Resolve only
-                # when one product is clearly stronger; otherwise Agent 2 asks for
-                # clarification instead of binding the graph to an accessory.
-                # Fuzzy search
                 cur.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
+                # Use both word_similarity (partial) and similarity (full) and
+                # take the best score between them so short product names like
+                # "iPhone 15" still match stored titles like
+                # "Apple iPhone 15 (128GB, Black)".
                 cur.execute(
-                    "SELECT canonical_id, title FROM products "
-                    "ORDER BY word_similarity(%s, title) DESC LIMIT 50",
-                    (query,)
+                    """
+                    SELECT p.canonical_id, p.title,
+                           GREATEST(
+                               word_similarity(%s, p.title),
+                               similarity(%s, p.title)
+                           ) AS score,
+                           EXISTS (
+                               SELECT 1 FROM price_history ph 
+                               WHERE ph.canonical_id = p.canonical_id
+                           ) AS has_history
+                    FROM products p
+                    ORDER BY score DESC
+                    LIMIT 100
+                    """,
+                    (query, query),
                 )
-                ranked = sorted(
-                    (
-                        (product_relevance(query, candidate_title), candidate_id, candidate_title)
-                        for candidate_id, candidate_title in cur.fetchall()
-                    ),
-                    reverse=True,
-                )
-                ranked = [candidate for candidate in ranked if candidate[0] >= 0.10]
+                # Re-rank with product_relevance (brand/family-aware).
+                # Crucial step: Give a strong preference (+0.25 bonus) to actual ASINs
+                # over fallback 'title:' hashes. Add an additional (+0.25 bonus) if
+                # the product actually has historical price data available. This ensures
+                # we pick the variant that will successfully populate the History charts.
+                ranked = []
+                for candidate_id, candidate_title, _db_score, has_history in cur.fetchall():
+                    score = product_relevance(query, candidate_title)
+                    if score >= 0.10:
+                        sort_score = score
+                        if not candidate_id.startswith('title:'):
+                            sort_score += 0.25
+                        if has_history:
+                            sort_score += 0.25
+                        ranked.append((sort_score, score, candidate_id, candidate_title))
+                
+                ranked.sort(reverse=True)
                 if ranked:
-                    _score, asin, title = ranked[0]
+                    _sort_score, _score, asin, title = ranked[0]
     except Exception as e:
         errors.append(str(e))
     
@@ -199,12 +221,13 @@ def history_agent_node(state: PriceLensState):
         
         system_prompt = (
             "You are the History & Trend Analyst Agent for PriceLens.\n"
-            "Your objective is to analyze the historical price trajectory of a product and determine if today is a financially optimal time to buy.\n\n"
+            "Your objective is to analyze the historical price trajectory of a product and build a strong reasoning based on the knowledge gained.\n\n"
             "INSTRUCTIONS:\n"
             "1. Call `check_price_trend` for the product.\n"
             "2. Analyze the JSON. Is the product near its All-Time Low (S_history >= 75)?\n"
             "3. If it is expensive (S_history < 75), call `get_historical_sale_drops` to find the target wait price.\n"
-            "4. Write a 3-sentence financial analysis explaining the momentum and seasonality. End with a clear BUY_NOW or WAIT stance."
+            "4. Write a 3-sentence financial analysis explaining the momentum and seasonality.\n"
+            "CRITICAL: Do NOT output a final decision (e.g., BUY_NOW or WAIT). Only provide the reasoning and context. The final decision will be taken care of by the synthesizer agent."
         )
         
         agent = create_react_agent(llm, tools=[check_price_trend, get_historical_sale_drops], prompt=system_prompt)
@@ -213,7 +236,8 @@ def history_agent_node(state: PriceLensState):
         # Suppress system prompt display for cleaner UI.
         
         final_state = None
-        for step in agent.stream({"messages": [("user", f"Analyze the historical price for ASIN: {asin}")]}):
+        prompt_instruction = f"Analyze the historical price for Product ID: {asin}. (If the ID starts with 'title:', you MUST include the 'title:' prefix when calling tools)."
+        for step in agent.stream({"messages": [("user", prompt_instruction)]}):
             for node_name, node_state in step.items():
                 messages = node_state.get("messages", [])
                 if not isinstance(messages, list):
@@ -250,7 +274,7 @@ def history_agent_node(state: PriceLensState):
             "input_summary": "Database results",
             "output_summary": "Financial analysis generated",
             "duration_ms": 0,
-            "display_prompt": "Analyze the historical price trajectory and determine if today is a financially optimal time to buy."
+            "display_prompt": "Analyze the historical price trajectory and provide reasoning based on the knowledge gained."
         })
         
     except Exception as exc:
@@ -262,15 +286,14 @@ def history_agent_node(state: PriceLensState):
         elif stance == "BUY_NOW":
             llm_analysis = (
                 "The current price is close to the product's verified historical low. "
-                "Based on the stored price history, the current recommendation is BUY NOW."
+                "Based on the stored price history, this represents a historically optimal entry point."
             )
         else:
             target = drops.get("safe_target_price")
             target_text = f" near ₹{target:,.0f}" if target is not None else ""
             llm_analysis = (
                 "The current price is above the preferred historical buying range. "
-                f"Consider waiting for a target price{target_text}; the current "
-                "recommendation is WAIT."
+                f"Historical data suggests a strong likelihood of price drops{target_text}."
             )
         
         stream_trace({
@@ -330,6 +353,17 @@ def market_agent_node(state: PriceLensState):
         )
         providers = build_providers(settings, provider_names) if provider_names else []
         database = MarketDatabase(settings.database_url)
+        from tools.market_websearch_tool import PriceSignalWebSearchTool
+
+        _openai_key = (os.getenv("OPENAI_API_KEY") or "").strip()
+        web_search_tool = (
+            PriceSignalWebSearchTool(
+                api_key=_openai_key,
+                model=os.getenv("MARKET_AGENT_LLM_MODEL") or os.getenv("OPENAI_MODEL") or "gpt-4o-mini",
+            )
+            if _openai_key and _openai_key != "not-needed"
+            else None
+        )
         agent = MarketInvestigatorAgent(
             database,
             providers,
@@ -343,6 +377,7 @@ def market_agent_node(state: PriceLensState):
             ),
             enable_llm_summary=settings.market_agent_llm_enabled,
             trace_callback=a2_callback,
+            web_search_tool=web_search_tool,
         )
         request = MarketAgentRequest(
             query=state.get("query", ""),

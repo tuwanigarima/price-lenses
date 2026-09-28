@@ -404,20 +404,12 @@ def render_market_agent_report(report: dict) -> None:
                 "fallback": "△",
                 "error": "✕",
             }.get(event.get("status"), "•")
-            st.markdown(
-                f"**{index}. {status_icon} {str(event.get('stage') or '').replace('_', ' ').title()}** "
-                f"— {float(event.get('duration_ms') or 0):,.0f} ms"
-            )
-            st.caption(
-                f"Tool: {event.get('tool', '-')} · Source: {event.get('source', '-')} · "
-                f"Status: {event.get('status', 'unknown')}"
-            )
-            st.caption(f"Input: {event.get('input_summary') or 'No input summary.'}")
-            st.write(event.get("output_summary") or "No result summary.")
-            if event.get("display_prompt"):
-                st.code(event["display_prompt"], language="text")
-            else:
-                st.caption("Prompt: Not applicable — this stage does not use an LLM.")
+            
+            tool_name = event.get('tool', 'unknown_tool')
+            duration = float(event.get('duration_ms') or 0)
+            
+            st.markdown(f"**{index}. {status_icon} Executed `{tool_name}`** ({duration:,.0f} ms)")
+            st.write(f"↳ {event.get('output_summary') or 'Task completed.'}")
 
 
 def render_policy_report(report: dict) -> None:
@@ -478,21 +470,12 @@ def render_policy_report(report: dict) -> None:
                 "fallback": "△",
                 "error": "✕",
             }.get(event.get("status"), "•")
-            st.markdown(
-                f"**{index}. {status_icon} "
-                f"{str(event.get('stage') or '').replace('_', ' ').title()}** "
-                f"— {float(event.get('duration_ms') or 0):,.0f} ms"
-            )
-            st.caption(
-                f"Tool: {event.get('tool', '-')} · Source: {event.get('source', '-')} · "
-                f"Status: {event.get('status', 'unknown')}"
-            )
-            st.caption(f"Input: {event.get('input_summary') or 'No input summary.'}")
-            st.write(event.get("output_summary") or "No output summary.")
-            if event.get("display_prompt"):
-                st.code(event["display_prompt"], language="text")
-            else:
-                st.caption("Prompt: Not applicable — this stage does not use an LLM.")
+            
+            tool_name = event.get('tool', 'unknown_tool')
+            duration = float(event.get('duration_ms') or 0)
+            
+            st.markdown(f"**{index}. {status_icon} Executed `{tool_name}`** ({duration:,.0f} ms)")
+            st.write(f"↳ {event.get('output_summary') or 'Task completed.'}")
 
 
 def run_unified_analysis(query: str, *, live_market: bool) -> dict | None:
@@ -610,7 +593,7 @@ def render_unified_tab() -> None:
     policy = result.get("policy_report") or {}
     reports[0].metric(
         "Agent 1 · History",
-        (history.get("trend") or {}).get("historical_stance", "No evidence"),
+        "Analysis Complete" if history.get("trend") else "No Evidence",
     )
     reports[1].metric("Agent 2 · Market", str(market.get("status", "unknown")).title())
     reports[2].metric(
@@ -642,7 +625,7 @@ def render_unified_tab() -> None:
             st.markdown(f"**Recommended Retailer:** {retailer}")
             st.markdown(f"**Rationale:** {final.get('primary_rationale', '')}")
             
-        if draft and draft != final:
+        if draft and draft.get("decision") != final.get("decision"):
             st.warning("⚠️ The deterministic verifier gate modified the LLM's draft verdict to enforce grounding rules.")
         st.markdown("---")
     else:
